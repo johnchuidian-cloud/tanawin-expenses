@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { AlertCircle, Plus, Search } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { AlertCircle, Plus, Search, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { getEntries, getUserById } from "@/lib/store";
@@ -15,6 +16,14 @@ export default function StaffEntriesPage() {
   useStoreTick();
   const me = useCurrentUser();
   const myId = me?.id ?? null;
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Drilldown filters arrive via URL params from dashboard tiles and the
+  // categories breakdown page. They're cleared with the "X" chip in the header.
+  const categoryFilter = searchParams.get("category");
+  const staffIdFilter = searchParams.get("staffId");
+  const staffFilterUser = staffIdFilter ? getUserById(staffIdFilter) : null;
 
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
@@ -25,6 +34,8 @@ export default function StaffEntriesPage() {
     const q = query.trim().toLowerCase();
     return allEntries
       .filter((e) => {
+        if (categoryFilter && e.category !== categoryFilter) return false;
+        if (staffIdFilter && e.loggedBy !== staffIdFilter) return false;
         if (filter === "mine" && e.loggedBy !== myId) return false;
         if (filter === "flagged" && !e.flags.some((f) => !f.resolved)) return false;
         if (q.length === 0) return true;
@@ -35,7 +46,7 @@ export default function StaffEntriesPage() {
         );
       })
       .sort((a, b) => (a.date < b.date ? 1 : -1));
-  }, [allEntries, filter, query, myId]);
+  }, [allEntries, filter, query, myId, categoryFilter, staffIdFilter]);
 
   // Group by date for visual separation
   const grouped = useMemo(() => {
@@ -67,6 +78,19 @@ export default function StaffEntriesPage() {
             <Plus className="w-3.5 h-3.5" /> New
           </Link>
         </div>
+        {(categoryFilter || staffIdFilter) && (
+          <div className="mb-3 flex items-center gap-2 text-xs">
+            <span className="text-ink-500">Filtered by:</span>
+            <button
+              onClick={() => router.replace("/entries")}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-ink-900 text-white"
+              aria-label="Clear filter"
+            >
+              {categoryFilter ?? staffFilterUser?.name ?? "—"}
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+        )}
         <div className="relative">
           <Search className="w-4 h-4 text-ink-300 absolute left-3 top-1/2 -translate-y-1/2" />
           <input

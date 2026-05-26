@@ -164,7 +164,7 @@ export default function StaffHomePage() {
               </div>
             ))}
           </div>
-          <Link href="/dashboard/categories" className="btn btn-sm w-full mt-3 text-ink-500">
+          <Link href="/categories" className="btn btn-sm w-full mt-3 text-ink-500">
             See all categories ↗
           </Link>
         </div>

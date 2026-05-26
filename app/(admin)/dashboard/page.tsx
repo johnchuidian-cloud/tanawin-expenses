@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
-import { AlertCircle, ArrowDownRight, ArrowUpRight, Clock } from "lucide-react";
+import { AlertCircle, ArrowDownRight, ArrowUpRight, Clock, Plus } from "lucide-react";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { getEntries, getPcfBalance, getPcfLedger, getUserById } from "@/lib/store";
 import { peso, pesoShort, relativeDate, toMonthKey, entryInMonth, monthLabel } from "@/lib/format";
@@ -113,6 +113,15 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
+      {/* Lexi's own quick-add — for utility bills and other expenses she
+          pays directly without a palengke receipt. */}
+      <div className="px-5 pt-4">
+        <Link href="/new" className="btn-primary w-full h-13 text-base">
+          <Plus className="w-5 h-5" />
+          Log new expense
+        </Link>
+      </div>
+
       {/* This month */}
       <div className="px-5 pt-5">
         <div className="flex items-baseline justify-between mb-2">
@@ -148,13 +157,17 @@ export default function AdminDashboardPage() {
           <p className="text-sm font-medium text-ink-900 mb-2">Spend by staff — {monthLabel(thisMonth).split(" ")[0]}</p>
           <div className="space-y-1.5">
             {byStaff.map((s) => (
-              <div key={s.id} className="flex items-center justify-between p-2.5 rounded-lg bg-white border border-sand-200">
+              <Link
+                key={s.id}
+                href={`/entries?staffId=${s.id}`}
+                className="flex items-center justify-between p-2.5 rounded-lg bg-white border border-sand-200 hover:bg-sand-50 transition-colors"
+              >
                 <div>
                   <p className="text-sm text-ink-900">{s.name}</p>
                   <p className="text-[11px] text-ink-500">{s.count} entr{s.count === 1 ? "y" : "ies"}</p>
                 </div>
                 <p className="text-sm font-medium text-ink-900">{peso(s.total)}</p>
-              </div>
+              </Link>
             ))}
           </div>
         </div>
@@ -163,10 +176,17 @@ export default function AdminDashboardPage() {
       {/* Top categories */}
       {categoryTotals.length > 0 && (
         <div className="px-5 pt-5">
-          <p className="text-sm font-medium text-ink-900 mb-2">Top categories — {monthLabel(thisMonth).split(" ")[0]}</p>
+          <div className="flex items-baseline justify-between mb-2">
+            <p className="text-sm font-medium text-ink-900">Top categories — {monthLabel(thisMonth).split(" ")[0]}</p>
+            <Link href="/categories" className="text-[11px] text-ink-500">All ↗</Link>
+          </div>
           <div className="space-y-2">
             {categoryTotals.map(([cat, total]) => (
-              <div key={cat}>
+              <Link
+                key={cat}
+                href={`/entries?category=${encodeURIComponent(cat)}`}
+                className="block hover:bg-sand-50 rounded-md -mx-1 px-1 py-1 transition-colors"
+              >
                 <div className="flex justify-between text-xs mb-1">
                   <span className="text-ink-900">{cat}</span>
                   <span className="text-ink-500">
@@ -176,7 +196,7 @@ export default function AdminDashboardPage() {
                 <div className="h-1.5 bg-sand-100 rounded-full overflow-hidden">
                   <div className="h-full bg-leaf-300" style={{ width: `${(total / maxCategoryTotal) * 100}%` }} />
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         </div>
@@ -206,16 +226,17 @@ export default function AdminDashboardPage() {
       <div className="px-5 pt-5">
         <div className="flex items-baseline justify-between mb-2">
           <p className="text-sm font-medium text-ink-900">Recent entries</p>
-          <Link href="/review" className="text-[11px] text-ink-500">Review ↗</Link>
+          <Link href="/entries" className="text-[11px] text-ink-500">All ↗</Link>
         </div>
         <div className="space-y-1.5">
           {recentEntries.map((entry) => {
             const hasOpenFlag = entry.flags.some((f) => !f.resolved);
             const logger = getUserById(entry.loggedBy);
             return (
-              <div
+              <Link
                 key={entry.id}
-                className="flex items-center justify-between p-2.5 rounded-lg bg-white border border-sand-200"
+                href={`/entries/${entry.id}`}
+                className="flex items-center justify-between p-2.5 rounded-lg bg-white border border-sand-200 hover:bg-sand-50 transition-colors"
               >
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-ink-900 truncate">
@@ -227,7 +248,7 @@ export default function AdminDashboardPage() {
                   </p>
                 </div>
                 <p className="text-sm font-medium text-ink-900 ml-3">{peso(entry.total)}</p>
-              </div>
+              </Link>
             );
           })}
         </div>
