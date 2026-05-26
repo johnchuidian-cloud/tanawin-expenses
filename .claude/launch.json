@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "tanawin-dev",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", ".claude\\run-dev.cmd"],
+      "port": 3000
+    }
+  ]
+}

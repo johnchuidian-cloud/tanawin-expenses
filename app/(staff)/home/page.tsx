@@ -1,0 +1,226 @@
+"use client";
+
+import Link from "next/link";
+import { useMemo } from "react";
+import { AlertCircle, ArrowDownRight, ArrowUpRight, Plus } from "lucide-react";
+import { useCurrentUser } from "@/lib/auth";
+import { useStoreTick } from "@/lib/useStoreTick";
+import { getEntries, getPcfBalance, getPcfLedger, getUserById } from "@/lib/store";
+import { peso, pesoShort, relativeDate, toMonthKey, entryInMonth, monthLabel } from "@/lib/format";
+import { staffCategoryLabel } from "@/lib/category-meta";
+import type { Category } from "@/lib/types";
+
+export default function StaffHomePage() {
+  useStoreTick(); // re-render on store changes
+  const user = useCurrentUser();
+  const entries = getEntries();
+  const ledger = getPcfLedger();
+  const balance = getPcfBalance();
+
+  const today = new Date();
+  const thisMonth = toMonthKey(today);
+  const prevMonthDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+  const prevMonth = toMonthKey(prevMonthDate);
+
+  const thisMonthEntries = useMemo(() => entries.filter((e) => entryInMonth(e.date, thisMonth)), [entries, thisMonth]);
+  const prevMonthEntries = useMemo(() => entries.filter((e) => entryInMonth(e.date, prevMonth)), [entries, prevMonth]);
+
+  const thisMonthTotal = thisMonthEntries.reduce((sum, e) => sum + e.total, 0);
+  const prevMonthTotal = prevMonthEntries.reduce((sum, e) => sum + e.total, 0);
+  const monthDelta = prevMonthTotal > 0 ? ((thisMonthTotal - prevMonthTotal) / prevMonthTotal) * 100 : 0;
+
+  const myEntriesThisMonth = thisMonthEntries.filter((e) => e.loggedBy === user?.id).length;
+
+  // Top categories for this month
+  const categoryTotals = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const e of thisMonthEntries) {
+      map.set(e.category, (map.get(e.category) ?? 0) + e.total);
+    }
+    return Array.from(map.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4);
+  }, [thisMonthEntries]);
+  const totalForCategoryView = categoryTotals.reduce((s, [, v]) => s + v, 0);
+  const maxCategoryTotal = categoryTotals[0]?.[1] ?? 1;
+
+  // Items needing attention: entries with open flags involving me, plus pending top-ups I reported
+  const openFlags = entries.filter((e) => e.flags.some((f) => !f.resolved) && e.loggedBy === user?.id).length;
+  const myPendingTopUps = ledger.filter((p) => p.status === "pending" && p.reportedBy === user?.id).length;
+  const attentionCount = openFlags + myPendingTopUps;
+
+  // Recent entries (any user) — surface the team's activity
+  const recentEntries = useMemo(() => entries.slice(0, 5), [entries]);
+
+  // Last approved top-up info
+  const lastApprovedTopUp = ledger.find((p) => p.kind === "top-up" && p.status === "approved");
+
+  // Month-on-month — last 5 months
+  const momData = useMemo(() => {
+    const months: { key: string; label: string; total: number; partial: boolean }[] = [];
+    for (let i = 4; i >= 0; i--) {
+      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      const key = toMonthKey(d);
+      const total = entries.filter((e) => entryInMonth(e.date, key)).reduce((s, e) => s + e.total, 0);
+      months.push({
+        key,
+        label: monthLabel(key).split(" ")[0].slice(0, 3),
+        total,
+        partial: i === 0,
+      });
+    }
+    return months;
+  }, [entries, today]);
+  const maxMonthTotal = Math.max(...momData.map((m) => m.total), 1);
+
+  return (
+    <div className="pb-2">
+      {/* PCF balance card */}
+      <div className="bg-leaf-50 px-5 py-4 border-b border-sand-200">
+        <p className="text-xs text-leaf-600">Pooled petty cash balance</p>
+        <p className="text-3xl font-medium text-leaf-600 mt-1">{peso(balance)}</p>
+        <div className="flex items-center justify-between mt-2">
+          <p className="text-xs text-leaf-600">
+            {lastApprovedTopUp
+              ? `Last top-up: ${relativeDate(lastApprovedTopUp.date)} · ${peso(lastApprovedTopUp.amount)}`
+              : "No top-ups recorded yet"}
+          </p>
+          <Link href="/pcf/log-topup" className="btn btn-sm bg-white border-leaf-200 text-leaf-600">
+            <Plus className="w-3.5 h-3.5" /> Log top-up
+          </Link>
+        </div>
+      </div>
+
+      {/* Attention bar */}
+      {attentionCount > 0 && (
+        <Link
+          href="/review"
+          className="block px-5 py-3 bg-clay-50 border-b border-sand-200 flex items-center gap-3"
+        >
+          <AlertCircle className="w-4 h-4 text-clay-500 flex-shrink-0" />
+          <p className="text-sm text-clay-500 flex-1">
+            {attentionCount} item{attentionCount > 1 ? "s" : ""} need{attentionCount > 1 ? "" : "s"} your attention
+          </p>
+          <span className="text-xs text-clay-500">Review →</span>
+        </Link>
+      )}
+
+      {/* Primary action */}
+      <div className="px-5 pt-4">
+        <Link href="/scan" className="btn-primary w-full h-13 text-base">
+          <Plus className="w-5 h-5" />
+          Log new expense
+        </Link>
+      </div>
+
+      {/* This month so far */}
+      <div className="px-5 pt-5">
+        <div className="flex items-baseline justify-between mb-2">
+          <p className="text-sm font-medium text-ink-900">This month so far</p>
+          <p className="text-[11px] text-ink-300">{monthLabel(thisMonth)}</p>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="stat-card">
+            <p className="text-[11px] text-ink-500">Total spent</p>
+            <p className="text-lg font-medium text-ink-900 mt-0.5">{peso(thisMonthTotal)}</p>
+            {prevMonthTotal > 0 && (
+              <p className="text-[11px] text-ink-500 mt-0.5 flex items-center gap-1">
+                {monthDelta < 0 ? (
+                  <ArrowDownRight className="w-3 h-3 text-leaf-500" />
+                ) : (
+                  <ArrowUpRight className="w-3 h-3 text-clay-500" />
+                )}
+                {Math.abs(monthDelta).toFixed(0)}% vs {monthLabel(prevMonth).split(" ")[0]}
+              </p>
+            )}
+          </div>
+          <div className="stat-card">
+            <p className="text-[11px] text-ink-500">Entries logged</p>
+            <p className="text-lg font-medium text-ink-900 mt-0.5">{thisMonthEntries.length}</p>
+            <p className="text-[11px] text-ink-500 mt-0.5">You logged {myEntriesThisMonth}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Top categories */}
+      {categoryTotals.length > 0 && (
+        <div className="px-5 pt-5">
+          <p className="text-sm font-medium text-ink-900 mb-2">Top categories — {monthLabel(thisMonth).split(" ")[0]}</p>
+          <div className="space-y-2">
+            {categoryTotals.map(([cat, total]) => (
+              <div key={cat}>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className="text-ink-900">{staffCategoryLabel(cat as Category)}</span>
+                  <span className="text-ink-500">
+                    {peso(total)} · {totalForCategoryView > 0 ? Math.round((total / totalForCategoryView) * 100) : 0}%
+                  </span>
+                </div>
+                <div className="h-1.5 bg-sand-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-leaf-300"
+                    style={{ width: `${(total / maxCategoryTotal) * 100}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+          <Link href="/dashboard/categories" className="btn btn-sm w-full mt-3 text-ink-500">
+            See all categories ↗
+          </Link>
+        </div>
+      )}
+
+      {/* Month on month */}
+      <div className="px-5 pt-5">
+        <p className="text-sm font-medium text-ink-900 mb-2">Month on month</p>
+        <div className="flex items-end gap-2 h-28">
+          {momData.map((m) => (
+            <div key={m.key} className="flex-1 flex flex-col items-center gap-1">
+              <div className="w-full flex-1 flex items-end">
+                <div
+                  className={"w-full rounded-t " + (m.partial ? "bg-leaf-200" : "bg-leaf-400")}
+                  style={{ height: `${(m.total / maxMonthTotal) * 100}%`, minHeight: m.total > 0 ? "4px" : "0" }}
+                  title={`${monthLabel(m.key)}: ${peso(m.total)}${m.partial ? " (partial)" : ""}`}
+                />
+              </div>
+              <p className="text-[10px] text-ink-500">{m.label}</p>
+              <p className="text-[10px] text-ink-700 font-medium">{pesoShort(m.total)}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Recent entries */}
+      <div className="px-5 pt-5">
+        <div className="flex items-baseline justify-between mb-2">
+          <p className="text-sm font-medium text-ink-900">Recent entries</p>
+          <Link href="/entries" className="text-[11px] text-ink-500">All ↗</Link>
+        </div>
+        <div className="space-y-1.5">
+          {recentEntries.map((entry) => {
+            const hasOpenFlag = entry.flags.some((f) => !f.resolved);
+            const logger = getUserById(entry.loggedBy);
+            return (
+              <Link
+                key={entry.id}
+                href={`/entries/${entry.id}`}
+                className="flex items-center justify-between p-2.5 rounded-lg bg-white border border-sand-200 hover:bg-sand-50 transition-colors"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-ink-900 truncate">
+                    {hasOpenFlag && <AlertCircle className="w-3 h-3 text-clay-500 inline mr-1 -mt-0.5" />}
+                    {entry.vendor} · {entry.item}
+                  </p>
+                  <p className="text-[11px] text-ink-500 mt-0.5">
+                    {relativeDate(entry.date)} · {staffCategoryLabel(entry.category)} · {logger?.name ?? "—"}
+                  </p>
+                </div>
+                <p className="text-sm font-medium text-ink-900 ml-3">{peso(entry.total)}</p>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}

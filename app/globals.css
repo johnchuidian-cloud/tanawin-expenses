@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    background-color: #FBFAF6;
+    color: #1F1B16;
+    -webkit-font-smoothing: antialiased;
+  }
+  button {
+    cursor: pointer;
+  }
+}
+
+@layer components {
+  /* Touch-friendly tap targets across the app — staff phones, gloves at the palengke, etc */
+  .tap-target {
+    min-height: 44px;
+  }
+
+  /* Standard button look: outlined, warm sand background on hover */
+  .btn {
+    @apply px-4 h-11 inline-flex items-center justify-center gap-2 rounded-lg border border-sand-200 bg-white text-ink-900 text-sm font-medium transition-colors hover:bg-sand-50 active:scale-[0.98];
+  }
+  .btn-primary {
+    @apply px-4 h-11 inline-flex items-center justify-center gap-2 rounded-lg bg-leaf-500 text-white text-sm font-medium transition-colors hover:bg-leaf-600 active:scale-[0.98] border border-leaf-500;
+  }
+  .btn-danger-ghost {
+    @apply px-4 h-11 inline-flex items-center justify-center gap-2 rounded-lg border border-clay-200 bg-white text-clay-500 text-sm font-medium transition-colors hover:bg-clay-50;
+  }
+  .btn-sm {
+    @apply h-8 px-3 text-xs;
+  }
+
+  .input {
+    @apply w-full h-11 px-3 rounded-lg border border-sand-200 bg-white text-ink-900 placeholder:text-ink-300 focus:outline-none focus:ring-2 focus:ring-leaf-300 focus:border-leaf-300 text-base;
+  }
+  .label {
+    @apply text-xs text-ink-500 block mb-1.5;
+  }
+
+  .card {
+    @apply rounded-xl border border-sand-200 bg-white;
+  }
+  .stat-card {
+    @apply rounded-lg bg-sand-100 p-3;
+  }
+
+  /* Color-coded flag badges */
+  .badge {
+    @apply inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium;
+  }
+  .badge-amber {
+    @apply bg-clay-50 text-clay-500;
+  }
+  .badge-red {
+    @apply bg-red-50 text-red-700;
+  }
+  .badge-leaf {
+    @apply bg-leaf-50 text-leaf-600;
+  }
+  .badge-sand {
+    @apply bg-sand-100 text-ink-700;
+  }
+}
