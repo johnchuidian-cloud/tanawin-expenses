@@ -66,8 +66,9 @@ desktop.ini
 ehthumbs.db
 $RECYCLE.BIN/
 
-# Claude Code (per-user settings)
+# Claude Code (per-user settings and runtime state)
 .claude/settings.local.json
+.claude/*.lock
 
 # Misc
 *.log
