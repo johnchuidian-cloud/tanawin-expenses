@@ -44,10 +44,17 @@ export default function StaffHomePage() {
   const totalForCategoryView = categoryTotals.reduce((s, [, v]) => s + v, 0);
   const maxCategoryTotal = categoryTotals[0]?.[1] ?? 1;
 
-  // Items needing attention: entries with open flags involving me, plus pending top-ups I reported
-  const openFlags = entries.filter((e) => e.flags.some((f) => !f.resolved) && e.loggedBy === user?.id).length;
-  const myPendingTopUps = ledger.filter((p) => p.status === "pending" && p.reportedBy === user?.id).length;
-  const attentionCount = openFlags + myPendingTopUps;
+  // Items needing the staff's attention: entries they logged where Lexi (or
+  // another teammate) left a pushback note AND a flag is still open. These
+  // are the cases that genuinely need a staff response before Lexi can
+  // Mark OK. Pending top-ups don't qualify — those are awaiting *Lexi's*
+  // action, not the reporter's.
+  const attentionCount = entries.filter(
+    (e) =>
+      e.loggedBy === user?.id &&
+      e.flags.some((f) => !f.resolved) &&
+      e.notes.some((n) => n.kind === "pushback" && n.authorId !== user?.id),
+  ).length;
 
   // Recent entries (any user) — surface the team's activity
   const recentEntries = useMemo(() => entries.slice(0, 5), [entries]);
@@ -91,17 +98,18 @@ export default function StaffHomePage() {
         </div>
       </div>
 
-      {/* Attention bar */}
+      {/* Attention bar — links to /notes where "Needs your attention" lists
+          the same pushback entries that need a response. */}
       {attentionCount > 0 && (
         <Link
-          href="/review"
+          href="/notes"
           className="block px-5 py-3 bg-clay-50 border-b border-sand-200 flex items-center gap-3"
         >
           <AlertCircle className="w-4 h-4 text-clay-500 flex-shrink-0" />
           <p className="text-sm text-clay-500 flex-1">
-            {attentionCount} item{attentionCount > 1 ? "s" : ""} need{attentionCount > 1 ? "" : "s"} your attention
+            {attentionCount} entr{attentionCount === 1 ? "y needs" : "ies need"} your response
           </p>
-          <span className="text-xs text-clay-500">Review →</span>
+          <span className="text-xs text-clay-500">Open →</span>
         </Link>
       )}
 
