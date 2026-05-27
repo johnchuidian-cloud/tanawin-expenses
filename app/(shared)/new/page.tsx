@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, ArrowLeft, Check, RefreshCw } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
-import { addEntry, getEntries } from "@/lib/store";
+import { addEntry, addNoteToEntry, getEntries } from "@/lib/store";
 import { peso, toIsoDate } from "@/lib/format";
 import { CATEGORIES, type Category, type PaymentSource } from "@/lib/types";
 import { CATEGORY_META } from "@/lib/category-meta";
@@ -31,6 +31,7 @@ export default function StaffNewEntryPage() {
   const [majorRepair, setMajorRepair] = useState(false);
   const [paidFrom, setPaidFrom] = useState<PaymentSource>("pcf");
   const [paidFromAutoSuggested, setPaidFromAutoSuggested] = useState(false);
+  const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   function handleCategoryChange(next: Category | "") {
@@ -135,6 +136,20 @@ export default function StaffNewEntryPage() {
       flags,
       notes: [],
     });
+
+    // Optional context note — gets attached as a regular comment so it shows
+    // up in the entry's conversation thread and on the admin review card if
+    // the entry ends up flagged. Especially useful for pre-explaining
+    // unusual amounts (Lexi asked me to stock up, market price was high
+    // today, etc.) so admin doesn't have to ask later.
+    const trimmedNote = note.trim();
+    if (trimmedNote.length > 0) {
+      addNoteToEntry(entry.id, {
+        authorId: me.id,
+        body: trimmedNote,
+        kind: "comment",
+      });
+    }
 
     // If this entry was logged against a receipt, return to that receipt so
     // staff can keep adding line items and watch the reconciliation status
@@ -384,10 +399,30 @@ export default function StaffNewEntryPage() {
               </div>
             ))}
             <p className="text-[11px] text-ink-500">
-              You can still save — Lexi will review.
+              You can still save — leave a note below to explain in advance.
             </p>
           </div>
         )}
+
+        <div>
+          <label htmlFor="note" className="label">Note (optional)</label>
+          <textarea
+            id="note"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            placeholder={
+              previewFlags.length > 0
+                ? "e.g. Ate Lexi told me to stock up for the long weekend"
+                : "Add context if the price is unusual or someone asked you to buy something specific"
+            }
+            className="w-full px-3 py-2 rounded-lg border border-sand-200 bg-white text-base text-ink-900 placeholder:text-ink-300 focus:outline-none focus:ring-2 focus:ring-leaf-300 focus:border-leaf-300 resize-none"
+          />
+          <p className="text-[11px] text-ink-500 mt-1">
+            Saves a question later — shows on the entry&rsquo;s thread and on
+            Lexi&rsquo;s review card if the entry gets flagged.
+          </p>
+        </div>
 
         <div>
           <label htmlFor="date" className="label">Date</label>

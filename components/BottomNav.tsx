@@ -2,7 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, List, PlusCircle, FileText, LayoutDashboard, Wallet, AlertCircle, Image as ImageIcon } from "lucide-react";
+import {
+  AlertCircle,
+  FileText,
+  Home,
+  Image as ImageIcon,
+  LayoutDashboard,
+  List,
+  PlusCircle,
+  Wallet,
+} from "lucide-react";
 import type { Role } from "@/lib/types";
 
 interface NavItem {
@@ -18,20 +27,31 @@ const STAFF_NAV: NavItem[] = [
   { href: "/notes", label: "Notes", icon: FileText },
 ];
 
+// Lexi also logs expenses (utility bills she pays directly), so "New" is
+// in her nav too. Five items is the cap we'll target for mobile thumbs;
+// keeping the grid dynamic in case the lineup changes.
 const ADMIN_NAV: NavItem[] = [
   { href: "/dashboard", label: "Home", icon: LayoutDashboard },
   { href: "/pcf", label: "PCF", icon: Wallet },
+  { href: "/new", label: "New", icon: PlusCircle },
   { href: "/review", label: "Review", icon: AlertCircle },
   { href: "/gallery", label: "Gallery", icon: ImageIcon },
 ];
 
+const COL_CLASS: Record<number, string> = {
+  3: "grid-cols-3",
+  4: "grid-cols-4",
+  5: "grid-cols-5",
+};
+
 export default function BottomNav({ role }: { role: Role }) {
   const pathname = usePathname();
   const items = role === "admin" ? ADMIN_NAV : STAFF_NAV;
+  const colClass = COL_CLASS[items.length] ?? "grid-cols-4";
 
   return (
     <nav className="sticky bottom-0 left-0 right-0 z-30 bg-white border-t border-sand-200">
-      <div className="max-w-screen-sm mx-auto grid grid-cols-4">
+      <div className={`max-w-screen-sm mx-auto grid ${colClass}`}>
         {items.map((item) => {
           const active = pathname === item.href || pathname.startsWith(item.href + "/");
           const Icon = item.icon;
