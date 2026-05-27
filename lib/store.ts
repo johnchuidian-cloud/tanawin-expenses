@@ -159,16 +159,38 @@ export function reportPcfTopUp(input: {
   return full;
 }
 
-export function approvePcfTopUp(id: string, approverId: string): void {
+export function approvePcfTopUp(
+  id: string,
+  approverId: string,
+  decisionNote?: string,
+): void {
   pcfLedger = pcfLedger.map((p) =>
-    p.id === id ? { ...p, status: "approved", approvedBy: approverId } : p,
+    p.id === id
+      ? {
+          ...p,
+          status: "approved",
+          approvedBy: approverId,
+          decisionNote: decisionNote?.trim() || undefined,
+        }
+      : p,
   );
   notify();
 }
 
-export function rejectPcfTopUp(id: string, approverId: string): void {
+export function rejectPcfTopUp(
+  id: string,
+  approverId: string,
+  decisionNote?: string,
+): void {
   pcfLedger = pcfLedger.map((p) =>
-    p.id === id ? { ...p, status: "rejected", approvedBy: approverId } : p,
+    p.id === id
+      ? {
+          ...p,
+          status: "rejected",
+          approvedBy: approverId,
+          decisionNote: decisionNote?.trim() || undefined,
+        }
+      : p,
   );
   notify();
 }

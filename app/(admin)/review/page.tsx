@@ -1,20 +1,19 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { AlertCircle, Check, Clock, MessageSquare, X } from "lucide-react";
+import { AlertCircle, Check, MessageSquare, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
 import {
   addNoteToEntry,
-  approvePcfTopUp,
   getEntries,
   getPcfLedger,
   getUserById,
-  rejectPcfTopUp,
   resolveFlag,
 } from "@/lib/store";
 import { formatDateTime, peso, relativeDate } from "@/lib/format";
 import type { Entry, FlagKind } from "@/lib/types";
+import PendingTopUpCard from "@/components/PendingTopUpCard";
 
 const FLAG_LABEL: Record<FlagKind, string> = {
   arithmetic: "Arithmetic mismatch",
@@ -88,53 +87,9 @@ export default function AdminReviewPage() {
             Top-ups awaiting approval · {pendingTopUps.length}
           </p>
           <div className="space-y-2">
-            {pendingTopUps.map((p) => {
-              const reporter = getUserById(p.reportedBy);
-              return (
-                <div
-                  key={p.id}
-                  className="rounded-lg bg-white border border-sand-200 p-3"
-                >
-                  <div className="flex items-start gap-3">
-                    <Clock className="w-4 h-4 text-ink-300 flex-shrink-0 mt-0.5" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-ink-900">
-                        {peso(p.amount)}
-                      </p>
-                      <p className="text-[11px] text-ink-500 mt-0.5">
-                        {relativeDate(p.date)} · reported by{" "}
-                        {reporter?.name ?? "—"}
-                      </p>
-                      {p.note && (
-                        <p className="text-xs text-ink-700 mt-1 italic">
-                          &ldquo;{p.note}&rdquo;
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex gap-2 mt-3">
-                    <button
-                      onClick={() => {
-                        if (!myId) return;
-                        approvePcfTopUp(p.id, myId);
-                      }}
-                      className="btn btn-sm flex-1 bg-leaf-500 text-white border-leaf-500"
-                    >
-                      <Check className="w-3.5 h-3.5" /> Approve
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (!myId) return;
-                        rejectPcfTopUp(p.id, myId);
-                      }}
-                      className="btn btn-sm flex-1 bg-white border-sand-200 text-ink-700"
-                    >
-                      <X className="w-3.5 h-3.5" /> Reject
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+            {pendingTopUps.map((p) => (
+              <PendingTopUpCard key={p.id} entry={p} adminId={myId} />
+            ))}
           </div>
         </section>
       )}

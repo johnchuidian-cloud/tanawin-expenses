@@ -5,25 +5,21 @@ import { useMemo } from "react";
 import {
   ArrowDown,
   ArrowUp,
-  Check,
-  Clock,
+  MessageSquare,
   Wallet,
-  X,
   XCircle,
 } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
 import {
-  approvePcfTopUp,
   getEntries,
   getPcfBalance,
   getPcfLedger,
   getUserById,
-  rejectPcfTopUp,
 } from "@/lib/store";
 import { peso, relativeDate } from "@/lib/format";
-import type { PcfLedgerEntry } from "@/lib/types";
 import ExportButton from "@/components/ExportButton";
+import PendingTopUpCard from "@/components/PendingTopUpCard";
 
 export default function AdminPcfPage() {
   useStoreTick();
@@ -124,7 +120,7 @@ export default function AdminPcfPage() {
           </p>
           <div className="space-y-2">
             {pending.map((p) => (
-              <PendingTopUpRow key={p.id} entry={p} myId={myId} />
+              <PendingTopUpCard key={p.id} entry={p} adminId={myId} />
             ))}
           </div>
         </section>
@@ -174,6 +170,17 @@ export default function AdminPcfPage() {
                         <p className="text-xs text-ink-700 mt-1 italic">
                           &ldquo;{p.note}&rdquo;
                         </p>
+                      )}
+                      {p.decisionNote && (
+                        <div className="mt-1.5 flex items-start gap-1.5 text-xs">
+                          <MessageSquare className="w-3 h-3 text-ink-300 flex-shrink-0 mt-0.5" />
+                          <p className="text-ink-700 break-words">
+                            <span className="text-ink-500">
+                              {approver?.name ?? "Admin"}:{" "}
+                            </span>
+                            {p.decisionNote}
+                          </p>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -231,48 +238,6 @@ export default function AdminPcfPage() {
           })}
         </div>
       </section>
-    </div>
-  );
-}
-
-function PendingTopUpRow({
-  entry,
-  myId,
-}: {
-  entry: PcfLedgerEntry;
-  myId: string | null;
-}) {
-  const reporter = getUserById(entry.reportedBy);
-  return (
-    <div className="rounded-lg bg-white border border-sand-200 p-3">
-      <div className="flex items-start gap-3">
-        <Clock className="w-4 h-4 text-ink-300 flex-shrink-0 mt-0.5" />
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-ink-900">{peso(entry.amount)}</p>
-          <p className="text-[11px] text-ink-500 mt-0.5">
-            {relativeDate(entry.date)} · reported by {reporter?.name ?? "—"}
-          </p>
-          {entry.note && (
-            <p className="text-xs text-ink-700 mt-1 italic">
-              &ldquo;{entry.note}&rdquo;
-            </p>
-          )}
-        </div>
-      </div>
-      <div className="flex gap-2 mt-3">
-        <button
-          onClick={() => myId && approvePcfTopUp(entry.id, myId)}
-          className="btn btn-sm flex-1 bg-leaf-500 text-white border-leaf-500"
-        >
-          <Check className="w-3.5 h-3.5" /> Approve
-        </button>
-        <button
-          onClick={() => myId && rejectPcfTopUp(entry.id, myId)}
-          className="btn btn-sm flex-1 bg-white border-sand-200 text-ink-700"
-        >
-          <X className="w-3.5 h-3.5" /> Reject
-        </button>
-      </div>
     </div>
   );
 }

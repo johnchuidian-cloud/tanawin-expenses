@@ -41,7 +41,8 @@ interface PcfRow {
   date: string;
   "reported by": string;
   "approved by": string;
-  note: string;
+  "reporter note": string;
+  "admin note": string;
 }
 
 interface ReceiptRow {
@@ -95,7 +96,8 @@ function buildPcfRows(): PcfRow[] {
     date: p.date,
     "reported by": userName(p.reportedBy),
     "approved by": userName(p.approvedBy),
-    note: p.note ?? "",
+    "reporter note": p.note ?? "",
+    "admin note": p.decisionNote ?? "",
   }));
 }
 

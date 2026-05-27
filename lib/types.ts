@@ -130,7 +130,13 @@ export interface PcfLedgerEntry {
   reportedBy: string; // user ID
   approvedBy?: string; // user ID (admin)
   status: PcfStatus; // pending applies to top-ups awaiting Lexi approval
-  note?: string;
+  note?: string; // reporter's note at submission time
+  /**
+   * Admin's note attached at approve/reject time. Required for rejections
+   * so the reporter sees why; optional for approvals (Lexi might want to
+   * leave a question or context even on a yes).
+   */
+  decisionNote?: string;
   linkedEntryId?: string; // for drawdowns: which entry this PCF spent on
   createdAt: string;
 }
