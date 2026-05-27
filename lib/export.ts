@@ -43,6 +43,8 @@ interface PcfRow {
   "approved by": string;
   "reporter note": string;
   "admin note": string;
+  resolved: string;
+  "resolved by": string;
 }
 
 interface ReceiptRow {
@@ -98,6 +100,8 @@ function buildPcfRows(): PcfRow[] {
     "approved by": userName(p.approvedBy),
     "reporter note": p.note ?? "",
     "admin note": p.decisionNote ?? "",
+    resolved: p.resolved ? "Yes" : "",
+    "resolved by": p.resolved ? userName(p.resolvedBy) : "",
   }));
 }
 

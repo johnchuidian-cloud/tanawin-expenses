@@ -184,13 +184,18 @@ export default function AdminPcfPage() {
                       )}
                     </div>
                   </div>
-                  <span
-                    className={
-                      "badge " + (rejected ? "badge-sand" : "badge-leaf")
-                    }
-                  >
-                    {rejected ? "Rejected" : "Approved"}
-                  </span>
+                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                    <span
+                      className={
+                        "badge " + (rejected ? "badge-sand" : "badge-leaf")
+                      }
+                    >
+                      {rejected ? "Rejected" : "Approved"}
+                    </span>
+                    {rejected && p.resolved && (
+                      <span className="badge badge-leaf">Resolved</span>
+                    )}
+                  </div>
                 </div>
               );
             })}

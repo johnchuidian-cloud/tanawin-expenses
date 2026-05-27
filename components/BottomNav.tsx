@@ -11,6 +11,7 @@ import {
   List,
   PlusCircle,
   Wallet,
+  XCircle,
 } from "lucide-react";
 import type { Role } from "@/lib/types";
 
@@ -28,13 +29,15 @@ const STAFF_NAV: NavItem[] = [
 ];
 
 // Lexi also logs expenses (utility bills she pays directly), so "New" is
-// in her nav too. Five items is the cap we'll target for mobile thumbs;
-// keeping the grid dynamic in case the lineup changes.
+// in her nav too. Rejected sits next to Review since they're sibling
+// queues — pending vs. needs-follow-up. Six items is at the upper end
+// of what mobile thumbs can hit cleanly; we'll keep an eye on this.
 const ADMIN_NAV: NavItem[] = [
   { href: "/dashboard", label: "Home", icon: LayoutDashboard },
   { href: "/pcf", label: "PCF", icon: Wallet },
   { href: "/new", label: "New", icon: PlusCircle },
   { href: "/review", label: "Review", icon: AlertCircle },
+  { href: "/rejections", label: "Rejected", icon: XCircle },
   { href: "/gallery", label: "Gallery", icon: ImageIcon },
 ];
 
@@ -42,6 +45,7 @@ const COL_CLASS: Record<number, string> = {
   3: "grid-cols-3",
   4: "grid-cols-4",
   5: "grid-cols-5",
+  6: "grid-cols-6",
 };
 
 export default function BottomNav({ role }: { role: Role }) {

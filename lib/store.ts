@@ -194,3 +194,23 @@ export function rejectPcfTopUp(
   );
   notify();
 }
+
+/**
+ * Marks a rejected top-up as resolved (the underlying issue was addressed).
+ * Idempotent — already-resolved entries are a no-op. Doesn't change status
+ * back to approved; "rejected, resolved" stays distinct in the ledger so
+ * the audit trail is preserved.
+ */
+export function resolvePcfRejection(id: string, resolverId: string): void {
+  pcfLedger = pcfLedger.map((p) =>
+    p.id === id && p.status === "rejected" && !p.resolved
+      ? {
+          ...p,
+          resolved: true,
+          resolvedBy: resolverId,
+          resolvedAt: new Date().toISOString(),
+        }
+      : p,
+  );
+  notify();
+}

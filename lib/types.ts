@@ -137,6 +137,14 @@ export interface PcfLedgerEntry {
    * leave a question or context even on a yes).
    */
   decisionNote?: string;
+  /**
+   * Admin marks a rejected top-up as resolved once it's been addressed —
+   * staff resubmitted, the cash was found, the missing receipt arrived,
+   * etc. Until resolved, the rejection shows on the Rejections tab.
+   */
+  resolved?: boolean;
+  resolvedAt?: string;
+  resolvedBy?: string;
   linkedEntryId?: string; // for drawdowns: which entry this PCF spent on
   createdAt: string;
 }
