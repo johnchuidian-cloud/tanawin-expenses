@@ -4,17 +4,25 @@ import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, ArrowLeft, Check, Lightbulb, RefreshCw } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
-import { addEntry, addNoteToEntry, getEntries } from "@/lib/store";
+import {
+  addEntry,
+  addNoteToEntry,
+  getCategoryDefs,
+  getEntries,
+} from "@/lib/store";
+import { useStoreTick } from "@/lib/useStoreTick";
 import { peso, toIsoDate } from "@/lib/format";
-import { CATEGORIES, type Category, type PaymentSource } from "@/lib/types";
-import { CATEGORY_META, staffCategoryLabel } from "@/lib/category-meta";
+import type { Category, PaymentSource } from "@/lib/types";
+import { iconFor, staffCategoryLabel } from "@/lib/category-meta";
 import { suggestCategory } from "@/lib/category-hints";
 import { flagsForEntry, suggestsMajorRepair } from "@/lib/validation";
 
 export default function StaffNewEntryPage() {
+  useStoreTick(); // re-render when categories are added/removed
   const router = useRouter();
   const searchParams = useSearchParams();
   const me = useCurrentUser();
+  const categoryDefs = getCategoryDefs();
 
   // When /new is opened from a scanned receipt, pre-fill vendor/date and
   // remember the receipt id so we link the new entry back and return there.
@@ -306,15 +314,14 @@ export default function StaffNewEntryPage() {
             </button>
           )}
           <div className="grid grid-cols-3 gap-2">
-            {CATEGORIES.map((c) => {
-              const meta = CATEGORY_META[c];
-              const Icon = meta.icon;
-              const active = category === c;
+            {categoryDefs.map((def) => {
+              const Icon = iconFor(def.id);
+              const active = category === def.id;
               return (
                 <button
-                  key={c}
+                  key={def.id}
                   type="button"
-                  onClick={() => handleCategoryChange(c)}
+                  onClick={() => handleCategoryChange(def.id)}
                   aria-pressed={active}
                   className={
                     "p-2.5 rounded-lg border flex flex-col items-center text-center gap-1 transition-colors " +
@@ -330,11 +337,11 @@ export default function StaffNewEntryPage() {
                     }
                   />
                   <span className="text-[11px] leading-tight font-medium text-ink-900">
-                    {c}
+                    {def.id}
                   </span>
-                  {meta.tagalog && (
+                  {def.tagalog && (
                     <span className="text-[10px] leading-tight text-ink-500">
-                      ({meta.tagalog})
+                      ({def.tagalog})
                     </span>
                   )}
                 </button>

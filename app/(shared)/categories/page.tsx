@@ -6,15 +6,16 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
-import { getEntries } from "@/lib/store";
+import { getCategoryDefs, getEntries } from "@/lib/store";
 import {
   entryInMonth,
   monthLabel,
   peso,
   toMonthKey,
 } from "@/lib/format";
-import { CATEGORIES, type Category } from "@/lib/types";
-import { CATEGORY_META, staffCategoryLabel } from "@/lib/category-meta";
+import type { Category } from "@/lib/types";
+import { iconFor, staffCategoryLabel } from "@/lib/category-meta";
+import { Settings2 } from "lucide-react";
 
 type Scope = "this-month" | "all-time";
 
@@ -33,11 +34,13 @@ export default function CategoriesPage() {
     return entries.filter((e) => entryInMonth(e.date, thisMonthKey));
   }, [entries, scope, thisMonthKey]);
 
-  // Total per category; iterate the canonical CATEGORIES list so missing
-  // ones still show with ₱0 — useful at the start of a month.
+  // Total per category; seed with the current category list so unused
+  // ones still show at ₱0. Use the live def list so admins see custom
+  // categories as soon as they create them.
+  const defs = getCategoryDefs();
   const rows = useMemo(() => {
     const map = new Map<Category, { total: number; count: number }>();
-    for (const c of CATEGORIES) map.set(c, { total: 0, count: 0 });
+    for (const d of defs) map.set(d.id, { total: 0, count: 0 });
     for (const e of scoped) {
       const cur = map.get(e.category) ?? { total: 0, count: 0 };
       map.set(e.category, { total: cur.total + e.total, count: cur.count + 1 });
@@ -45,7 +48,7 @@ export default function CategoriesPage() {
     return Array.from(map.entries())
       .map(([category, v]) => ({ category, ...v }))
       .sort((a, b) => b.total - a.total);
-  }, [scoped]);
+  }, [scoped, defs]);
 
   const grandTotal = rows.reduce((s, r) => s + r.total, 0);
   const maxCategoryTotal = rows[0]?.total ?? 1;
@@ -66,12 +69,20 @@ export default function CategoriesPage() {
         >
           <ArrowLeft className="w-4 h-4 text-ink-700" />
         </button>
-        <div>
+        <div className="flex-1 min-w-0">
           <p className="text-base font-medium text-ink-900">Categories</p>
           <p className="text-[11px] text-ink-500">
             Spend breakdown across all team members
           </p>
         </div>
+        {me?.role === "admin" && (
+          <Link
+            href="/categories/manage"
+            className="btn btn-sm bg-white border-sand-200 text-ink-700"
+          >
+            <Settings2 className="w-3.5 h-3.5" /> Manage
+          </Link>
+        )}
       </div>
 
       {/* Scope toggle */}
@@ -109,7 +120,7 @@ export default function CategoriesPage() {
       {/* Rows */}
       <div className="px-5 pt-4 space-y-3">
         {rows.map(({ category, total, count }) => {
-          const Icon = CATEGORY_META[category].icon;
+          const Icon = iconFor(category);
           const pct = grandTotal > 0 ? Math.round((total / grandTotal) * 100) : 0;
           return (
             <Link

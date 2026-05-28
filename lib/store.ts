@@ -14,12 +14,175 @@
 "use client";
 
 import { MOCK_ENTRIES, MOCK_PCF_LEDGER, MOCK_RECEIPTS, MOCK_USERS } from "../mocks/seed";
-import type { Entry, Note, PcfLedgerEntry, Receipt, User } from "./types";
+import { BUILTIN_CATEGORIES } from "./types";
+import type {
+  Category,
+  CategoryDef,
+  Entry,
+  Note,
+  PcfLedgerEntry,
+  Receipt,
+  User,
+} from "./types";
 
 let entries: Entry[] = [...MOCK_ENTRIES];
 let receipts: Receipt[] = [...MOCK_RECEIPTS];
 let pcfLedger: PcfLedgerEntry[] = [...MOCK_PCF_LEDGER];
 const users: User[] = [...MOCK_USERS];
+
+// ---------- CATEGORIES ----------
+// Built-in defs derive their icon key from the built-in list; the actual
+// icon component is resolved at render time in lib/category-meta.ts.
+const BUILTIN_ICON_KEYS: Record<Category, string> = {
+  Breakfast: "sun",
+  "Lunch/Dinner": "utensils",
+  "Staff Meals": "users",
+  Coffee: "coffee",
+  Kitchen: "chef-hat",
+  "Room Supplies": "bath",
+  "Cleaning Supplies": "sparkles",
+  Laundry: "shirt",
+  Utilities: "zap",
+  "Drinking Water": "glass-water",
+  Communications: "phone",
+  "Fuel & Gas": "fuel",
+  Maintenance: "wrench",
+  Admin: "briefcase",
+  Accounting: "calculator",
+  Compliance: "shield-check",
+  Other: "more-horizontal",
+};
+
+const BUILTIN_TAGALOG: Record<Category, string> = {
+  Breakfast: "Almusal",
+  "Lunch/Dinner": "Tanghalian/Hapunan",
+  "Staff Meals": "Pagkain ng staff",
+  Coffee: "Kape",
+  Kitchen: "Kusina",
+  "Room Supplies": "Gamit sa kwarto",
+  "Cleaning Supplies": "Panlinis",
+  Laundry: "Labada",
+  Utilities: "Kuryente/Tubig",
+  "Drinking Water": "Inuming tubig",
+  Communications: "Telepono/Internet",
+  "Fuel & Gas": "Gasolina/LPG",
+  Maintenance: "Pagkumpuni",
+  Admin: "Pamamahala",
+  Accounting: "",
+  Compliance: "",
+  Other: "Iba pa",
+};
+
+const BUILTIN_DEFS: CategoryDef[] = BUILTIN_CATEGORIES.map((id) => ({
+  id,
+  tagalog: BUILTIN_TAGALOG[id] || undefined,
+  iconKey: BUILTIN_ICON_KEYS[id] ?? "package",
+  builtin: true,
+}));
+
+const CUSTOM_CATEGORIES_KEY = "tanawin.customCategoryDefs";
+
+function loadCustomCategoryDefs(): CategoryDef[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(CUSTOM_CATEGORIES_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (d): d is CategoryDef =>
+          d &&
+          typeof d.id === "string" &&
+          typeof d.iconKey === "string" &&
+          d.builtin === false,
+      )
+      // Defensive: never let a custom shadow a builtin
+      .filter((d) => !BUILTIN_CATEGORIES.includes(d.id));
+  } catch {
+    return [];
+  }
+}
+
+function saveCustomCategoryDefs(defs: CategoryDef[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      CUSTOM_CATEGORIES_KEY,
+      JSON.stringify(defs.filter((d) => !d.builtin)),
+    );
+  } catch {
+    // localStorage may be unavailable (Safari private, quota, etc.) — fall
+    // back to in-memory only. The user sees no error, just no persistence.
+  }
+}
+
+let categoryDefs: CategoryDef[] = [...BUILTIN_DEFS, ...loadCustomCategoryDefs()];
+
+export function getCategoryDefs(): CategoryDef[] {
+  return categoryDefs;
+}
+
+export function getCategoryDef(id: Category): CategoryDef | undefined {
+  return categoryDefs.find((d) => d.id === id);
+}
+
+/**
+ * Adds a new (custom) category. Returns the new def, or null if the name
+ * collides with an existing category (builtin or custom). Names are
+ * trimmed and compared case-insensitively to avoid "Snacks" vs "snacks"
+ * fragmentation.
+ */
+export function addCategoryDef(input: {
+  id: string;
+  tagalog?: string;
+  iconKey?: string;
+}): CategoryDef | null {
+  const id = input.id.trim();
+  if (id.length === 0) return null;
+  const existing = categoryDefs.find(
+    (d) => d.id.toLowerCase() === id.toLowerCase(),
+  );
+  if (existing) return null;
+  const def: CategoryDef = {
+    id,
+    tagalog: input.tagalog?.trim() || undefined,
+    iconKey: input.iconKey ?? "package",
+    builtin: false,
+  };
+  categoryDefs = [...categoryDefs, def];
+  saveCustomCategoryDefs(categoryDefs);
+  notify();
+  return def;
+}
+
+/**
+ * Removes a custom category. Returns `{ ok: true }` on success, or
+ * `{ ok: false, reason }` if blocked. Built-ins can't be removed; custom
+ * categories can't be removed while any entry still references them
+ * (the user would lose that data's categorization).
+ */
+export function deleteCategoryDef(id: Category): {
+  ok: boolean;
+  reason?: string;
+} {
+  const def = categoryDefs.find((d) => d.id === id);
+  if (!def) return { ok: false, reason: "Category not found." };
+  if (def.builtin) {
+    return { ok: false, reason: "Built-in categories can't be deleted." };
+  }
+  const usageCount = entries.filter((e) => e.category === id).length;
+  if (usageCount > 0) {
+    return {
+      ok: false,
+      reason: `${usageCount} entr${usageCount === 1 ? "y uses" : "ies use"} this category — reassign them first.`,
+    };
+  }
+  categoryDefs = categoryDefs.filter((d) => d.id !== id);
+  saveCustomCategoryDefs(categoryDefs);
+  notify();
+  return { ok: true };
+}
 
 /** Subscribers re-render when the store changes. Lightweight pub-sub. */
 const subscribers = new Set<() => void>();

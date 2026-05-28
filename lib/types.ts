@@ -8,24 +8,25 @@
 
 export type Role = "admin" | "staff";
 
-export type Category =
-  | "Breakfast"
-  | "Lunch/Dinner"
-  | "Staff Meals"
-  | "Coffee"
-  | "Kitchen"
-  | "Room Supplies"
-  | "Cleaning Supplies"
-  | "Laundry"
-  | "Utilities"
-  | "Drinking Water"
-  | "Communications"
-  | "Fuel & Gas"
-  | "Maintenance"
-  | "Admin"
-  | "Accounting"
-  | "Compliance"
-  | "Other";
+/**
+ * Category labels are plain strings so admins can add new ones from the
+ * app at runtime (see /categories/manage). The list below is the seed of
+ * built-in categories that ship with the prototype; custom ones live in
+ * the store and persist to localStorage. The Category type stays as
+ * `string` for forward-compat — anything serializable can be a category.
+ */
+export type Category = string;
+
+/**
+ * Metadata for one category. `builtin: true` means it came from the seed
+ * and can't be deleted via the UI; user-added defs are `builtin: false`.
+ */
+export interface CategoryDef {
+  id: Category; // doubles as the display label and the value stored on entries
+  tagalog?: string;
+  iconKey: string; // key into the icon registry in lib/category-meta.ts
+  builtin: boolean;
+}
 
 /**
  * Where the cash for this entry came from.
@@ -39,7 +40,13 @@ export type Category =
  */
 export type PaymentSource = "pcf" | "other";
 
-export const CATEGORIES: Category[] = [
+/**
+ * Built-in categories shipped with the prototype, in display order.
+ * The actual runtime list (built-in + user-added) comes from
+ * `getCategoryDefs()` in lib/store.ts. Don't iterate this directly in
+ * UI code — you'll miss the custom ones.
+ */
+export const BUILTIN_CATEGORIES: Category[] = [
   "Breakfast",
   "Lunch/Dinner",
   "Staff Meals",

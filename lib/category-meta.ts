@@ -5,62 +5,110 @@
  * in storage, reports, and admin views). Staff-facing UI uses
  * `staffCategoryLabel()` to render the bilingual form: "Breakfast (Almusal)".
  *
- * Translations chosen to match what palengke/B&B staff actually say day-to-day.
- * If a term has no widely-used Tagalog (Accounting, Compliance), we keep
- * the English so it doesn't read as fake.
+ * Since categories are now editable at runtime (see lib/store.ts), this
+ * module exposes lookup helpers that resolve from the live store rather
+ * than a static map. Icons are resolved through an icon registry that
+ * lists every icon a custom category can choose from.
  */
 
 import {
   Bath,
+  Box,
   Briefcase,
   Calculator,
   ChefHat,
   Coffee,
-  Droplet,
-  Flame,
+  Cookie,
+  Folder,
   Fuel,
   GlassWater,
+  Heart,
   MoreHorizontal,
+  Package,
   Phone,
+  Pizza,
   ShieldCheck,
   Shirt,
+  ShoppingCart,
   Sparkles,
+  Star,
   Sun,
+  Tag,
   Users,
   Utensils,
   Wrench,
   Zap,
   type LucideIcon,
 } from "lucide-react";
+import { getCategoryDef } from "./store";
 import type { Category } from "./types";
 
-export interface CategoryMeta {
-  tagalog: string; // empty string means "no commonly used Tagalog word"
-  icon: LucideIcon;
-}
+/**
+ * Icon registry. Built-in categories use a fixed subset; the rest of the
+ * icons here are surfaced in the category-create form so admins can pick
+ * something visually appropriate for a new category. Adding to this map
+ * is the only step needed to expand the icon options.
+ */
+export const ICON_REGISTRY: Record<string, LucideIcon> = {
+  // Built-in icons
+  sun: Sun,
+  utensils: Utensils,
+  users: Users,
+  coffee: Coffee,
+  "chef-hat": ChefHat,
+  bath: Bath,
+  sparkles: Sparkles,
+  shirt: Shirt,
+  zap: Zap,
+  "glass-water": GlassWater,
+  phone: Phone,
+  fuel: Fuel,
+  wrench: Wrench,
+  briefcase: Briefcase,
+  calculator: Calculator,
+  "shield-check": ShieldCheck,
+  "more-horizontal": MoreHorizontal,
 
-export const CATEGORY_META: Record<Category, CategoryMeta> = {
-  Breakfast: { tagalog: "Almusal", icon: Sun },
-  "Lunch/Dinner": { tagalog: "Tanghalian/Hapunan", icon: Utensils },
-  "Staff Meals": { tagalog: "Pagkain ng staff", icon: Users },
-  Coffee: { tagalog: "Kape", icon: Coffee },
-  Kitchen: { tagalog: "Kusina", icon: ChefHat },
-  "Room Supplies": { tagalog: "Gamit sa kwarto", icon: Bath },
-  "Cleaning Supplies": { tagalog: "Panlinis", icon: Sparkles },
-  Laundry: { tagalog: "Labada", icon: Shirt },
-  Utilities: { tagalog: "Kuryente/Tubig", icon: Zap },
-  "Drinking Water": { tagalog: "Inuming tubig", icon: GlassWater },
-  Communications: { tagalog: "Telepono/Internet", icon: Phone },
-  "Fuel & Gas": { tagalog: "Gasolina/LPG", icon: Fuel },
-  Maintenance: { tagalog: "Pagkumpuni", icon: Wrench },
-  Admin: { tagalog: "Pamamahala", icon: Briefcase },
-  Accounting: { tagalog: "", icon: Calculator },
-  Compliance: { tagalog: "", icon: ShieldCheck },
-  Other: { tagalog: "Iba pa", icon: MoreHorizontal },
+  // Extras for user-added categories
+  package: Package,
+  folder: Folder,
+  star: Star,
+  tag: Tag,
+  box: Box,
+  heart: Heart,
+  "shopping-cart": ShoppingCart,
+  cookie: Cookie,
+  pizza: Pizza,
 };
 
-// Re-exports so consumers don't need a second import.
-export { Droplet, Flame };
+/**
+ * Icons offered in the "create category" picker. Skips the built-in
+ * icons that are already strongly associated with seeded categories so
+ * admins don't accidentally make a custom category that looks like
+ * a built-in.
+ */
+export const PICKABLE_ICON_KEYS: string[] = [
+  "package",
+  "folder",
+  "star",
+  "tag",
+  "box",
+  "heart",
+  "shopping-cart",
+  "cookie",
+  "pizza",
+  "sparkles",
+];
+
+export function iconFor(category: Category): LucideIcon {
+  const def = getCategoryDef(category);
+  if (def && ICON_REGISTRY[def.iconKey]) return ICON_REGISTRY[def.iconKey];
+  return Package;
+}
+
+export function tagalogFor(category: Category): string | undefined {
+  return getCategoryDef(category)?.tagalog;
+}
 
 /**
  * Renders a staff-facing category label with the Tagalog translation in
@@ -68,6 +116,6 @@ export { Droplet, Flame };
  * returns the English label unchanged.
  */
 export function staffCategoryLabel(category: Category): string {
-  const tagalog = CATEGORY_META[category]?.tagalog;
+  const tagalog = tagalogFor(category);
   return tagalog ? `${category} (${tagalog})` : category;
 }
