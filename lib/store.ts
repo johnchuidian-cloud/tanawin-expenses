@@ -81,6 +81,35 @@ const BUILTIN_DEFS: CategoryDef[] = BUILTIN_CATEGORIES.map((id) => ({
 }));
 
 const CUSTOM_CATEGORIES_KEY = "tanawin.customCategoryDefs";
+const CATEGORY_HINTS_KEY = "tanawin.categoryHintOverrides";
+
+function loadHintOverrides(): Record<string, string[]> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(CATEGORY_HINTS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: Record<string, string[]> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (Array.isArray(v) && v.every((s) => typeof s === "string")) {
+        out[k] = v;
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function saveHintOverrides(map: Record<string, string[]>): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(CATEGORY_HINTS_KEY, JSON.stringify(map));
+  } catch {
+    // localStorage unavailable — fall back to in-memory only
+  }
+}
 
 function loadCustomCategoryDefs(): CategoryDef[] {
   if (typeof window === "undefined") return [];
@@ -117,7 +146,16 @@ function saveCustomCategoryDefs(defs: CategoryDef[]): void {
   }
 }
 
-let categoryDefs: CategoryDef[] = [...BUILTIN_DEFS, ...loadCustomCategoryDefs()];
+// Merge persisted hint overrides into both built-in and custom defs at init.
+const _hintOverrides = loadHintOverrides();
+let categoryDefs: CategoryDef[] = [
+  ...BUILTIN_DEFS,
+  ...loadCustomCategoryDefs(),
+].map((def) =>
+  _hintOverrides[def.id] && _hintOverrides[def.id].length > 0
+    ? { ...def, extraHints: _hintOverrides[def.id] }
+    : def,
+);
 
 export function getCategoryDefs(): CategoryDef[] {
   return categoryDefs;
@@ -182,6 +220,47 @@ export function deleteCategoryDef(id: Category): {
   saveCustomCategoryDefs(categoryDefs);
   notify();
   return { ok: true };
+}
+
+/**
+ * Replaces the extra hint keywords for a category. Works on built-ins and
+ * customs alike — built-ins keep their default hints (in lib/category-hints.ts)
+ * regardless; this list is purely additive.
+ *
+ * Pass an empty array (or null/undefined) to clear the extras.
+ */
+export function updateCategoryHints(
+  id: Category,
+  hints: string[] | null | undefined,
+): void {
+  const clean = (hints ?? [])
+    .map((h) => h.trim().toLowerCase())
+    .filter((h) => h.length > 0);
+  // Dedupe in-place — order matters for read display, so keep first occurrences.
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const h of clean) {
+    if (!seen.has(h)) {
+      seen.add(h);
+      deduped.push(h);
+    }
+  }
+
+  categoryDefs = categoryDefs.map((d) =>
+    d.id === id
+      ? { ...d, extraHints: deduped.length > 0 ? deduped : undefined }
+      : d,
+  );
+
+  // Persist only the overrides for any category that still has extras.
+  const map: Record<string, string[]> = {};
+  for (const d of categoryDefs) {
+    if (d.extraHints && d.extraHints.length > 0) {
+      map[d.id] = d.extraHints;
+    }
+  }
+  saveHintOverrides(map);
+  notify();
 }
 
 /** Subscribers re-render when the store changes. Lightweight pub-sub. */

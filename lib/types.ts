@@ -26,6 +26,14 @@ export interface CategoryDef {
   tagalog?: string;
   iconKey: string; // key into the icon registry in lib/category-meta.ts
   builtin: boolean;
+  /**
+   * Admin-added keyword patterns for the smart category suggestion on
+   * /new. These extend (never replace) the built-in defaults shipped in
+   * lib/category-hints.ts, so the seed suggestions keep working while
+   * admins can teach the form local vocabulary ("paksiw", "chichirya",
+   * etc.). Stored case-insensitively as lowercase substrings.
+   */
+  extraHints?: string[];
 }
 
 /**

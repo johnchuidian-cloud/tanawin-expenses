@@ -15,9 +15,17 @@
  * being ignored.
  */
 
+import { getCategoryDefs } from "./store";
 import type { Category } from "./types";
 
-const HINTS: Record<Category, string[]> = {
+/**
+ * Default keyword patterns shipped with the prototype. Exposed so the
+ * /categories/manage page can show admins what triggers each built-in
+ * category. To extend without code changes, admins use the "extra hints"
+ * field on each category — that's stored on the def and merged with
+ * these defaults at suggestion time.
+ */
+export const DEFAULT_HINTS: Record<Category, string[]> = {
   Breakfast: [
     "rice",
     "pandesal",
@@ -158,6 +166,10 @@ const HINTS: Record<Category, string[]> = {
  * Returns the best-guess category for free-text input. Returns null when
  * nothing matches with any confidence, so the form can decline to show a
  * suggestion rather than guess wrong.
+ *
+ * Iterates the live category list so admin-added categories with extra
+ * hints are picked up immediately. For built-ins, DEFAULT_HINTS and
+ * `def.extraHints` are concatenated.
  */
 export function suggestCategory(
   vendor: string,
@@ -167,18 +179,20 @@ export function suggestCategory(
   if (haystack.trim().length === 0) return null;
 
   let best: { category: Category; hits: number } | null = null;
-  for (const [category, keywords] of Object.entries(HINTS) as [
-    Category,
-    string[],
-  ][]) {
-    if (category === "Other") continue;
+  for (const def of getCategoryDefs()) {
+    if (def.id === "Other") continue;
+    const keywords = [
+      ...(DEFAULT_HINTS[def.id] ?? []),
+      ...(def.extraHints ?? []),
+    ];
+    if (keywords.length === 0) continue;
     let hits = 0;
     for (const kw of keywords) {
       if (haystack.includes(kw)) hits++;
     }
     if (hits === 0) continue;
     if (!best || hits > best.hits) {
-      best = { category, hits };
+      best = { category: def.id, hits };
     }
   }
   return best?.category ?? null;
