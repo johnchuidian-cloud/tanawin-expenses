@@ -7,10 +7,11 @@ import { AlertCircle, Plus, Search, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { getEntries, getUserById } from "@/lib/store";
-import { peso, relativeDate } from "@/lib/format";
+import { entryInMonth, monthLabel, peso, relativeDate, toMonthKey } from "@/lib/format";
 import { staffCategoryLabel } from "@/lib/category-meta";
 
 type Filter = "all" | "mine" | "flagged";
+type MonthScope = "all" | string; // "all" or a YYYY-MM key
 
 export default function StaffEntriesPage() {
   useStoreTick();
@@ -26,9 +27,20 @@ export default function StaffEntriesPage() {
   const staffFilterUser = staffIdFilter ? getUserById(staffIdFilter) : null;
 
   const [filter, setFilter] = useState<Filter>("all");
+  const [monthScope, setMonthScope] = useState<MonthScope>("all");
   const [query, setQuery] = useState("");
 
   const allEntries = getEntries();
+
+  // Available months for the scope dropdown — every month that has at least
+  // one entry, newest first. Always include the current month so a fresh
+  // filter view doesn't show an empty list with no scope options.
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of allEntries) set.add(toMonthKey(e.date));
+    set.add(toMonthKey(new Date()));
+    return Array.from(set).sort((a, b) => (a < b ? 1 : -1));
+  }, [allEntries]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -36,6 +48,7 @@ export default function StaffEntriesPage() {
       .filter((e) => {
         if (categoryFilter && e.category !== categoryFilter) return false;
         if (staffIdFilter && e.loggedBy !== staffIdFilter) return false;
+        if (monthScope !== "all" && !entryInMonth(e.date, monthScope)) return false;
         if (filter === "mine" && e.loggedBy !== myId) return false;
         if (filter === "flagged" && !e.flags.some((f) => !f.resolved)) return false;
         if (q.length === 0) return true;
@@ -46,7 +59,12 @@ export default function StaffEntriesPage() {
         );
       })
       .sort((a, b) => (a.date < b.date ? 1 : -1));
-  }, [allEntries, filter, query, myId, categoryFilter, staffIdFilter]);
+  }, [allEntries, filter, query, myId, categoryFilter, staffIdFilter, monthScope]);
+
+  const filteredTotal = useMemo(
+    () => filtered.reduce((s, e) => s + e.total, 0),
+    [filtered],
+  );
 
   // Group by date for visual separation
   const grouped = useMemo(() => {
@@ -129,6 +147,47 @@ export default function StaffEntriesPage() {
           );
         })}
       </div>
+
+      {/* Month scope chips — date range filter, useful when drilling into a
+          category to see e.g. "Coffee spend in April" vs the all-time view. */}
+      <div className="px-5 pt-2 flex gap-2 overflow-x-auto">
+        <button
+          onClick={() => setMonthScope("all")}
+          className={
+            "px-3 h-7 rounded-full text-[11px] font-medium whitespace-nowrap transition-colors " +
+            (monthScope === "all"
+              ? "bg-leaf-500 text-white"
+              : "bg-sand-100 text-ink-700 hover:bg-sand-200")
+          }
+        >
+          All time
+        </button>
+        {availableMonths.map((key) => {
+          const active = monthScope === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setMonthScope(key)}
+              className={
+                "px-3 h-7 rounded-full text-[11px] font-medium whitespace-nowrap transition-colors " +
+                (active
+                  ? "bg-leaf-500 text-white"
+                  : "bg-sand-100 text-ink-700 hover:bg-sand-200")
+              }
+            >
+              {monthLabel(key).split(" ")[0]} {monthLabel(key).split(" ")[1].slice(2)}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Filtered total — helps the user see the impact of their filters */}
+      {(categoryFilter || staffIdFilter || monthScope !== "all" || filter !== "all" || query) && (
+        <div className="px-5 pt-2 text-[11px] text-ink-500">
+          {filtered.length} entr{filtered.length === 1 ? "y" : "ies"} ·{" "}
+          {peso(filteredTotal)} total
+        </div>
+      )}
 
       {/* Empty state */}
       {filtered.length === 0 && (
