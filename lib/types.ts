@@ -14,6 +14,7 @@ export type Category =
   | "Staff Meals"
   | "Coffee"
   | "Kitchen"
+  | "Room Supplies"
   | "Cleaning Supplies"
   | "Laundry"
   | "Utilities"
@@ -44,6 +45,7 @@ export const CATEGORIES: Category[] = [
   "Staff Meals",
   "Coffee",
   "Kitchen",
+  "Room Supplies",
   "Cleaning Supplies",
   "Laundry",
   "Utilities",

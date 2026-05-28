@@ -2,12 +2,13 @@
 
 import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertCircle, ArrowLeft, Check, RefreshCw } from "lucide-react";
+import { AlertCircle, ArrowLeft, Check, Lightbulb, RefreshCw } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { addEntry, addNoteToEntry, getEntries } from "@/lib/store";
 import { peso, toIsoDate } from "@/lib/format";
 import { CATEGORIES, type Category, type PaymentSource } from "@/lib/types";
-import { CATEGORY_META } from "@/lib/category-meta";
+import { CATEGORY_META, staffCategoryLabel } from "@/lib/category-meta";
+import { suggestCategory } from "@/lib/category-hints";
 import { flagsForEntry, suggestsMajorRepair } from "@/lib/validation";
 
 export default function StaffNewEntryPage() {
@@ -84,6 +85,15 @@ export default function StaffNewEntryPage() {
     () => category === "Maintenance" && suggestsMajorRepair(category, displayedTotal),
     [category, displayedTotal],
   );
+
+  // Smart category suggestion — keyword match on vendor + item.
+  // Only shows when no category is picked yet; once the user taps any
+  // category we step out of the way (their pick beats our guess).
+  const suggestion = useMemo(
+    () => suggestCategory(vendor, item),
+    [vendor, item],
+  );
+  const showSuggestion = !!suggestion && category === "";
 
   function handleSubmit() {
     if (!me) return;
@@ -278,6 +288,23 @@ export default function StaffNewEntryPage() {
 
         <div>
           <p className="label">Category</p>
+          {showSuggestion && suggestion && (
+            <button
+              type="button"
+              onClick={() => handleCategoryChange(suggestion)}
+              className="w-full mb-2 px-3 py-2 rounded-lg bg-leaf-50 border border-leaf-100 flex items-center gap-2 hover:bg-leaf-100 transition-colors text-left"
+            >
+              <Lightbulb className="w-4 h-4 text-leaf-600 flex-shrink-0" />
+              <p className="text-xs text-leaf-600 flex-1">
+                Looks like{" "}
+                <span className="font-medium">
+                  {staffCategoryLabel(suggestion)}
+                </span>
+                ?{" "}
+                <span className="text-leaf-600/70">Tap to apply</span>
+              </p>
+            </button>
+          )}
           <div className="grid grid-cols-3 gap-2">
             {CATEGORIES.map((c) => {
               const meta = CATEGORY_META[c];

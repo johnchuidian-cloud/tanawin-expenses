@@ -11,6 +11,7 @@
  */
 
 import {
+  Bath,
   Briefcase,
   Calculator,
   ChefHat,
@@ -44,6 +45,7 @@ export const CATEGORY_META: Record<Category, CategoryMeta> = {
   "Staff Meals": { tagalog: "Pagkain ng staff", icon: Users },
   Coffee: { tagalog: "Kape", icon: Coffee },
   Kitchen: { tagalog: "Kusina", icon: ChefHat },
+  "Room Supplies": { tagalog: "Gamit sa kwarto", icon: Bath },
   "Cleaning Supplies": { tagalog: "Panlinis", icon: Sparkles },
   Laundry: { tagalog: "Labada", icon: Shirt },
   Utilities: { tagalog: "Kuryente/Tubig", icon: Zap },
