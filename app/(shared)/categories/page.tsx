@@ -53,7 +53,7 @@ export default function CategoriesPage() {
   const grandTotal = rows.reduce((s, r) => s + r.total, 0);
   const maxCategoryTotal = rows[0]?.total ?? 1;
 
-  // For staff (Maria, Joel, Rolly) use bilingual labels; for admin (Lexi)
+  // For staff (Janice, Sherill, Rio) use bilingual labels; for admin (Lexi)
   // stick to English to match the rest of her views.
   const isStaff = me?.role === "staff";
   const formatLabel = (c: Category) =>

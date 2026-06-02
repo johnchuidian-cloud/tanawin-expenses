@@ -232,7 +232,7 @@ function FlaggedEntryCard({ entry, myId }: { entry: Entry; myId: string | null }
             if (error) setError(null);
           }}
           rows={2}
-          placeholder="e.g. Asked Maria to double-check vs. the receipt"
+          placeholder="e.g. Asked Janice to double-check vs. the receipt"
           className="w-full mt-1 px-3 py-2 rounded-lg border border-sand-200 bg-white text-sm text-ink-900 placeholder:text-ink-300 focus:outline-none focus:ring-2 focus:ring-leaf-300 focus:border-leaf-300 resize-none"
         />
         {error && <p className="text-xs text-clay-500 mt-1">{error}</p>}

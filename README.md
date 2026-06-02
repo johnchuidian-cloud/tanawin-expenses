@@ -28,9 +28,9 @@ http://YOUR-COMPUTER-IP:3000 from a phone on the same WiFi.
 ## Login credentials (prototype only)
 
 - Lexi (admin): 1234
-- Maria (staff): 0001
-- Joel (staff): 0002
-- Rolly (staff): 0003
+- Janice (staff): 0001
+- Sherill (staff): 0002
+- Rio (staff): 0003
 
 ## Important caveat
 

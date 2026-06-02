@@ -108,7 +108,7 @@ export default function LoginPage() {
             />
             {error && <p className="text-xs text-clay-500 mt-2">{error}</p>}
             <p className="text-[11px] text-ink-300 mt-4 text-center">
-              For prototype: Lexi = 1234, Maria = 0001, Joel = 0002, Rolly = 0003
+              For prototype: Lexi = 1234, Janice = 0001, Sherill = 0002, Rio = 0003
             </p>
           </div>
         )}
