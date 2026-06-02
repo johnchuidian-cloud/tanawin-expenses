@@ -66,6 +66,51 @@ export async function bootstrapFromSupabase(): Promise<void> {
   }
 }
 
+/**
+ * Pull fresh data from Supabase without the once-only guard.
+ *
+ * Called whenever the user switches back to the tab (visibilitychange) or
+ * the window regains focus, so anyone looking at the app sees what their
+ * teammates have changed without needing to hard-refresh. Skips its own
+ * concurrent runs and refuses to run before the initial bootstrap has
+ * completed (otherwise it would race the bootstrap and write users twice).
+ */
+let _refreshing = false;
+export async function refreshFromSupabase(): Promise<void> {
+  if (!_bootstrapped || _refreshing) return;
+  _refreshing = true;
+  try {
+    const [usersRes, receiptsRes, entriesRes, pcfRes, catRes] = await Promise.all([
+      supabase.from("users").select("*"),
+      supabase.from("receipts").select("*"),
+      supabase.from("entries").select("*").order("created_at", { ascending: false }),
+      supabase.from("pcf_ledger").select("*").order("created_at", { ascending: false }),
+      supabase.from("category_defs").select("*").eq("builtin", false),
+    ]);
+    if (
+      usersRes.error || receiptsRes.error || entriesRes.error ||
+      pcfRes.error || catRes.error
+    ) {
+      console.error("supabase: refresh failed", {
+        usersRes, receiptsRes, entriesRes, pcfRes, catRes,
+      });
+      return;
+    }
+    users = usersRes.data!.map(mapUser);
+    receipts = receiptsRes.data!.map(mapReceipt);
+    entries = entriesRes.data!.map(mapEntry);
+    pcfLedger = pcfRes.data!.map(mapPcfLedger);
+    const customDefs = catRes.data!.map(mapCategoryDef);
+    categoryDefs = [...BUILTIN_DEFS, ...customDefs].map((def) => {
+      const overrides = _hintOverrides[def.id];
+      return overrides?.length ? { ...def, extraHints: overrides } : def;
+    });
+    notify();
+  } finally {
+    _refreshing = false;
+  }
+}
+
 // ---------- ROW MAPPERS (snake_case DB → camelCase TS) ----------
 
 function mapUser(row: Record<string, unknown>): User {

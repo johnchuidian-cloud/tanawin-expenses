@@ -17,6 +17,7 @@ export default function AdminDashboardPage() {
   const ledger = getPcfLedger();
   const balance = getPcfBalance();
 
+  const [clearedFlash, setClearedFlash] = useState(false);
   function handleClearPcfBalance() {
     if (!me) return;
     const formatted = peso(balance);
@@ -28,6 +29,8 @@ export default function AdminDashboardPage() {
     );
     if (!ok) return;
     clearPcfBalance(me.id);
+    setClearedFlash(true);
+    setTimeout(() => setClearedFlash(false), 3000);
   }
 
   const today = new Date();
@@ -157,14 +160,21 @@ export default function AdminDashboardPage() {
           </div>
           <ExportButton variant="sm" />
         </div>
-        <button
-          onClick={handleClearPcfBalance}
-          className="mt-3 inline-flex items-center gap-1.5 px-3 h-8 rounded-lg bg-white border border-leaf-200 text-leaf-600 text-xs font-medium hover:bg-leaf-100 transition-colors"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-          Clear PCF balance
-          <span className="text-[10px] text-leaf-600/70">(reset to ₱0)</span>
-        </button>
+        <div className="mt-3 flex items-center gap-2">
+          <button
+            onClick={handleClearPcfBalance}
+            className="inline-flex items-center gap-1.5 px-3 h-8 rounded-lg bg-white border border-leaf-200 text-leaf-600 text-xs font-medium hover:bg-leaf-100 transition-colors"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            Clear PCF balance
+            <span className="text-[10px] text-leaf-600/70">(reset to ₱0)</span>
+          </button>
+          {clearedFlash && (
+            <span className="text-[11px] text-leaf-600 inline-flex items-center gap-1 animate-pulse">
+              ✓ Saved — other devices need a refresh to see this
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Review queue */}
