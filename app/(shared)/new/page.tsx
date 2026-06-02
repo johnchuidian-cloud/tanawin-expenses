@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertCircle, ArrowLeft, Check, Lightbulb, RefreshCw } from "lucide-react";
+import { AlertCircle, ArrowLeft, Check, ImagePlus, Lightbulb, RefreshCw, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import {
   addEntry,
@@ -12,6 +12,7 @@ import {
 } from "@/lib/store";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { peso, toIsoDate } from "@/lib/format";
+import { fileToCompressedDataUrl } from "@/lib/image";
 import type { Category, PaymentSource } from "@/lib/types";
 import { iconFor, staffCategoryLabel } from "@/lib/category-meta";
 import { suggestCategory } from "@/lib/category-hints";
@@ -41,7 +42,22 @@ export default function StaffNewEntryPage() {
   const [paidFrom, setPaidFrom] = useState<PaymentSource>("pcf");
   const [paidFromAutoSuggested, setPaidFromAutoSuggested] = useState(false);
   const [note, setNote] = useState("");
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  async function handlePhoto(file: File) {
+    setPhotoBusy(true);
+    try {
+      const compressed = await fileToCompressedDataUrl(file);
+      setPhotoUrl(compressed);
+    } catch {
+      setError("Couldn't read that image. Try another photo.");
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
 
   function handleCategoryChange(next: Category | "") {
     setCategory(next);
@@ -150,6 +166,7 @@ export default function StaffNewEntryPage() {
       paidFrom,
       majorRepair: category === "Maintenance" ? majorRepair : undefined,
       receiptId: presetReceiptId ?? undefined,
+      photoUrl: photoUrl ?? undefined,
       loggedBy: me.id,
       flags,
       notes: [],
@@ -171,11 +188,13 @@ export default function StaffNewEntryPage() {
 
     // If this entry was logged against a receipt, return to that receipt so
     // staff can keep adding line items and watch the reconciliation status
-    // update. Otherwise, go to the new entry's detail page.
+    // update. Otherwise, go back to the home screen (role-appropriate) —
+    // that's where people expect to land after saving, and it avoids any
+    // edge-case bounce when the entry detail page mounts.
     if (presetReceiptId) {
       router.replace(`/scan/${presetReceiptId}`);
     } else {
-      router.replace(`/entries/${entry.id}`);
+      router.replace(me.role === "admin" ? "/dashboard" : "/home");
     }
   }
 
@@ -206,6 +225,67 @@ export default function StaffNewEntryPage() {
             will return you to the receipt so you can keep adding items.
           </div>
         )}
+
+        {/* Receipt photo (optional). No `capture` attribute → on phones the OS
+            shows the full picker (Photo Library / Take Photo / Files) instead
+            of jumping straight to the camera, so uploading from the gallery
+            works. */}
+        <div>
+          <p className="label">Receipt photo (optional)</p>
+          {photoUrl ? (
+            <div className="rounded-lg border border-leaf-300 bg-leaf-50/40 p-3 flex flex-col items-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={photoUrl}
+                alt="Receipt preview"
+                className="max-h-56 rounded object-contain"
+              />
+              <div className="flex items-center gap-4 mt-2">
+                <button
+                  type="button"
+                  onClick={() => fileInput.current?.click()}
+                  className="text-xs text-leaf-600 inline-flex items-center gap-1"
+                >
+                  <ImagePlus className="w-3.5 h-3.5" /> Replace
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPhotoUrl(null)}
+                  className="text-xs text-ink-500 inline-flex items-center gap-1"
+                >
+                  <X className="w-3.5 h-3.5" /> Remove
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileInput.current?.click()}
+              disabled={photoBusy}
+              className="w-full rounded-lg border-2 border-dashed border-sand-200 bg-sand-50 hover:bg-sand-100 transition-colors flex flex-col items-center justify-center text-center p-5 disabled:opacity-60"
+            >
+              <ImagePlus className="w-7 h-7 text-ink-300 mb-1.5" />
+              <p className="text-sm font-medium text-ink-900">
+                {photoBusy ? "Processing photo…" : "Add receipt photo"}
+              </p>
+              <p className="text-[11px] text-ink-500 mt-0.5">
+                Upload from your gallery or take a photo
+              </p>
+            </button>
+          )}
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handlePhoto(file);
+              // Reset so picking the same file again still fires onChange.
+              e.target.value = "";
+            }}
+          />
+        </div>
 
         <div>
           <label htmlFor="vendor" className="label">Vendor</label>

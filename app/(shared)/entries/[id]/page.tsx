@@ -9,6 +9,7 @@ import {
   AlertCircle,
   ArrowLeft,
   Check,
+  ImageIcon,
   Landmark,
   MessageSquare,
   Send,
@@ -136,6 +137,29 @@ export default function StaffEntryDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* Receipt photo, if one was attached when logging the entry */}
+      {entry.photoUrl && (
+        <div className="px-5 pt-4">
+          <p className="text-sm font-medium text-ink-900 mb-2 flex items-center gap-1.5">
+            <ImageIcon className="w-4 h-4 text-ink-500" /> Receipt photo
+          </p>
+          <a
+            href={entry.photoUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block rounded-lg border border-sand-200 bg-white overflow-hidden"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={entry.photoUrl}
+              alt={`Receipt for ${entry.vendor}`}
+              className="w-full max-h-96 object-contain bg-sand-50"
+            />
+          </a>
+          <p className="text-[11px] text-ink-500 mt-1">Tap the photo to open full size.</p>
+        </div>
+      )}
 
       {/* Flags */}
       {openFlags.length > 0 && (

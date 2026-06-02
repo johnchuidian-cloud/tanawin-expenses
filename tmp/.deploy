@@ -6,3 +6,4 @@ trigger
 2026-06-02e — clear-PCF button, manage-staff page, sign-out label
 2026-06-02f — auto-refresh on tab focus, saved-feedback toast
 2026-06-02g — fix auth race that bounced users to login mid-flow
+2026-06-02h — receipt photo upload on /new + return home after save
