@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, User as UserIcon } from "lucide-react";
+import { User as UserIcon } from "lucide-react";
 import { useCurrentUser, logout } from "@/lib/auth";
 import BottomNav from "@/components/BottomNav";
 
@@ -37,9 +37,6 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
           </p>
         </div>
         <div className="flex items-center gap-1">
-          <button aria-label="Notifications" className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-sand-100 relative">
-            <Bell className="w-4 h-4 text-ink-700" />
-          </button>
           <button
             onClick={() => {
               logout();
