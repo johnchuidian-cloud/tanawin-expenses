@@ -26,6 +26,16 @@ let users: User[] = [];
 let _bootstrapped = false;
 let _bootstrapping = false;
 
+/**
+ * True once bootstrapFromSupabase has populated the in-memory state.
+ * Auth code uses this to distinguish "session present, data not yet loaded"
+ * from "session present, user really doesn't exist" — only the second
+ * case should bounce the user to the login screen.
+ */
+export function isBootstrapComplete(): boolean {
+  return _bootstrapped;
+}
+
 export async function bootstrapFromSupabase(): Promise<void> {
   if (_bootstrapped || _bootstrapping) return;
   _bootstrapping = true;

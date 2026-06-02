@@ -12,7 +12,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { authenticateByPin, getUserById } from "./store";
+import {
+  authenticateByPin,
+  bootstrapFromSupabase,
+  getUserById,
+  isBootstrapComplete,
+} from "./store";
 import type { User } from "./types";
 
 const STORAGE_KEY = "tanawin.session.userId";
@@ -47,19 +52,55 @@ export function getCurrentUser(): User | null {
 /**
  * React hook that re-renders when the session changes.
  *
- * Returns `undefined` until the session has been read on the client, then
- * `User` (logged in) or `null` (logged out). Callers must treat `undefined`
- * as "still loading" and avoid redirecting on it — otherwise the first render
- * (always `undefined`) races ahead of the session read and bounces the user
- * to the login screen.
+ * Returns `undefined` until the session has been read AND the user lookup
+ * succeeds (i.e. Supabase bootstrap has populated the users array). Then
+ * resolves to `User` (logged in) or `null` (no session, or session id is
+ * stale — user not in DB).
+ *
+ * Callers must treat `undefined` as "still loading" and avoid redirecting
+ * on it — otherwise the first render races ahead of the session read and
+ * bounces the user to the login screen.
+ *
+ * Race-condition note: a navigation that runs before bootstrap finishes
+ * would otherwise see "session id present, users array empty, user is
+ * null" and redirect. We guard against that by holding `undefined`
+ * (loading) until bootstrap has actually completed; once it has, an
+ * unrecognised id genuinely means "stale session" and we resolve to null.
  */
 export function useCurrentUser(): User | null | undefined {
   const [user, setUser] = useState<User | null | undefined>(undefined);
   useEffect(() => {
-    setUser(getCurrentUser());
-    const onChange = () => setUser(getCurrentUser());
-    window.addEventListener("tanawin:auth", onChange);
-    return () => window.removeEventListener("tanawin:auth", onChange);
+    // Kick off bootstrap from here too. The layouts that use this hook
+    // gate their children behind `user`, so if we wait for the children
+    // to start bootstrap we deadlock (page can't render until user known,
+    // user can't be known until page-level bootstrap fires).
+    bootstrapFromSupabase();
+
+    function evaluate() {
+      const id = getCurrentUserId();
+      if (!id) {
+        setUser(null);
+        return;
+      }
+      const u = getUserById(id);
+      if (u) {
+        setUser(u);
+        return;
+      }
+      // Session id present but no matching user. If bootstrap hasn't
+      // finished, the user IS valid — we just don't have the row yet.
+      // Stay in loading state; the bootstrap-complete handler below
+      // will re-fire this when data lands.
+      if (!isBootstrapComplete()) {
+        setUser(undefined);
+        return;
+      }
+      // Bootstrap done and still no user → stale session.
+      setUser(null);
+    }
+    evaluate();
+    window.addEventListener("tanawin:auth", evaluate);
+    return () => window.removeEventListener("tanawin:auth", evaluate);
   }, []);
   return user;
 }
