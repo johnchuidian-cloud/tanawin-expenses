@@ -17,22 +17,35 @@ import type { Category } from "@/lib/types";
 import { iconFor, staffCategoryLabel } from "@/lib/category-meta";
 import { Settings2 } from "lucide-react";
 
-type Scope = "this-month" | "all-time";
+// "all" = every month combined; otherwise a YYYY-MM key like "2026-01".
+type Scope = "all" | string;
 
 export default function CategoriesPage() {
   useStoreTick();
   const me = useCurrentUser();
   const router = useRouter();
 
-  const [scope, setScope] = useState<Scope>("this-month");
   const entries = getEntries();
-
   const thisMonthKey = toMonthKey(new Date());
 
+  // Default to "all" so admins land on the full picture; previously the page
+  // opened on the current month, which was empty until staff logged something
+  // and hid historical months behind a single "All time" button.
+  const [scope, setScope] = useState<Scope>("all");
+
+  // Months that actually have entries, newest first. Current month is always
+  // included so the chip row isn't empty on a fresh database.
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of entries) set.add(toMonthKey(e.date));
+    set.add(thisMonthKey);
+    return Array.from(set).sort((a, b) => (a < b ? 1 : -1));
+  }, [entries, thisMonthKey]);
+
   const scoped = useMemo(() => {
-    if (scope === "all-time") return entries;
-    return entries.filter((e) => entryInMonth(e.date, thisMonthKey));
-  }, [entries, scope, thisMonthKey]);
+    if (scope === "all") return entries;
+    return entries.filter((e) => entryInMonth(e.date, scope));
+  }, [entries, scope]);
 
   // Total per category; seed with the current category list so unused
   // ones still show at ₱0. Use the live def list so admins see custom
@@ -90,27 +103,38 @@ export default function CategoriesPage() {
         )}
       </div>
 
-      {/* Scope toggle */}
-      <div className="px-5 pt-3 flex gap-2">
-        {(
-          [
-            { key: "this-month", label: monthLabel(thisMonthKey) },
-            { key: "all-time", label: "All time" },
-          ] as { key: Scope; label: string }[]
-        ).map((chip) => {
-          const active = scope === chip.key;
+      {/* Month scope chips — "All time" + one per month with data, newest first.
+          Horizontally scrollable so the row scales gracefully as more months
+          accumulate. */}
+      <div className="px-5 pt-3 flex gap-2 overflow-x-auto">
+        <button
+          onClick={() => setScope("all")}
+          className={
+            "px-3 h-8 rounded-full text-xs font-medium whitespace-nowrap transition-colors " +
+            (scope === "all"
+              ? "bg-leaf-500 text-white"
+              : "bg-sand-100 text-ink-700 hover:bg-sand-200")
+          }
+        >
+          All time
+        </button>
+        {availableMonths.map((key) => {
+          const active = scope === key;
+          // Compact label "May 26" so a full year of months fits on a phone.
+          const parts = monthLabel(key).split(" ");
+          const shortLabel = `${parts[0]} ${parts[1].slice(2)}`;
           return (
             <button
-              key={chip.key}
-              onClick={() => setScope(chip.key)}
+              key={key}
+              onClick={() => setScope(key)}
               className={
                 "px-3 h-8 rounded-full text-xs font-medium whitespace-nowrap transition-colors " +
                 (active
-                  ? "bg-ink-900 text-white"
+                  ? "bg-leaf-500 text-white"
                   : "bg-sand-100 text-ink-700 hover:bg-sand-200")
               }
             >
-              {chip.label}
+              {shortLabel}
             </button>
           );
         })}
@@ -118,7 +142,9 @@ export default function CategoriesPage() {
 
       {/* Total */}
       <div className="px-5 pt-3">
-        <p className="text-[11px] text-ink-500">Total {scope === "all-time" ? "" : `for ${monthLabel(thisMonthKey)}`}</p>
+        <p className="text-[11px] text-ink-500">
+          Total {scope === "all" ? "(all time)" : `for ${monthLabel(scope)}`}
+        </p>
         <p className="text-lg font-medium text-ink-900">{peso(grandTotal)}</p>
       </div>
 
