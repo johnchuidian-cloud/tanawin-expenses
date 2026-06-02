@@ -78,9 +78,14 @@ export default function CategoriesPage() {
         {me?.role === "admin" && (
           <Link
             href="/categories/manage"
-            className="btn btn-sm bg-white border-sand-200 text-ink-700"
+            className="flex flex-col items-center justify-center px-3 py-2 rounded-lg bg-white border border-sand-200 text-ink-700 hover:bg-sand-50 transition-colors"
           >
-            <Settings2 className="w-3.5 h-3.5" /> Manage
+            <span className="flex items-center gap-1.5 text-sm font-medium">
+              <Settings2 className="w-4 h-4" /> Manage
+            </span>
+            <span className="text-[10px] text-ink-500 mt-0.5 leading-tight">
+              (Add, delete, or edit categories)
+            </span>
           </Link>
         )}
       </div>
