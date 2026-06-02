@@ -68,6 +68,7 @@ export const BUILTIN_CATEGORIES: Category[] = [
   "Communications",
   "Fuel & Gas",
   "Maintenance",
+  "Garden and Animals",
   "Admin",
   "Accounting",
   "Compliance",
