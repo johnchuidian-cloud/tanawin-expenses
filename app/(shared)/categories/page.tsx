@@ -16,9 +16,7 @@ import {
 import type { Category } from "@/lib/types";
 import { iconFor, staffCategoryLabel } from "@/lib/category-meta";
 import { Settings2 } from "lucide-react";
-
-// "all" = every month combined; otherwise a YYYY-MM key like "2026-01".
-type Scope = "all" | string;
+import { MonthChips, type MonthScope } from "@/components/MonthChips";
 
 export default function CategoriesPage() {
   useStoreTick();
@@ -31,7 +29,7 @@ export default function CategoriesPage() {
   // Default to "all" so admins land on the full picture; previously the page
   // opened on the current month, which was empty until staff logged something
   // and hid historical months behind a single "All time" button.
-  const [scope, setScope] = useState<Scope>("all");
+  const [scope, setScope] = useState<MonthScope>("all");
 
   // Months that actually have entries, newest first. Current month is always
   // included so the chip row isn't empty on a fresh database.
@@ -103,42 +101,13 @@ export default function CategoriesPage() {
         )}
       </div>
 
-      {/* Month scope chips — "All time" + one per month with data, newest first.
-          Horizontally scrollable so the row scales gracefully as more months
-          accumulate. */}
-      <div className="px-5 pt-3 flex gap-2 overflow-x-auto">
-        <button
-          onClick={() => setScope("all")}
-          className={
-            "px-3 h-8 rounded-full text-xs font-medium whitespace-nowrap transition-colors " +
-            (scope === "all"
-              ? "bg-leaf-500 text-white"
-              : "bg-sand-100 text-ink-700 hover:bg-sand-200")
-          }
-        >
-          All time
-        </button>
-        {availableMonths.map((key) => {
-          const active = scope === key;
-          // Compact label "May 26" so a full year of months fits on a phone.
-          const parts = monthLabel(key).split(" ");
-          const shortLabel = `${parts[0]} ${parts[1].slice(2)}`;
-          return (
-            <button
-              key={key}
-              onClick={() => setScope(key)}
-              className={
-                "px-3 h-8 rounded-full text-xs font-medium whitespace-nowrap transition-colors " +
-                (active
-                  ? "bg-leaf-500 text-white"
-                  : "bg-sand-100 text-ink-700 hover:bg-sand-200")
-              }
-            >
-              {shortLabel}
-            </button>
-          );
-        })}
-      </div>
+      {/* Month scope chips — "All time" + one per month with data, with a
+          ← year separator marking the boundary into older calendar years. */}
+      <MonthChips
+        scope={scope}
+        onChange={setScope}
+        availableMonths={availableMonths}
+      />
 
       {/* Total */}
       <div className="px-5 pt-3">

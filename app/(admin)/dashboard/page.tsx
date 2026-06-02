@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { AlertCircle, ArrowDownRight, ArrowUpRight, Clock, Plus } from "lucide-react";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { getEntries, getPcfBalance, getPcfLedger, getUserById } from "@/lib/store";
 import { peso, pesoShort, relativeDate, toMonthKey, entryInMonth, monthLabel } from "@/lib/format";
 import ExportButton from "@/components/ExportButton";
+import { MonthChips, type MonthScope } from "@/components/MonthChips";
 
 export default function AdminDashboardPage() {
   useStoreTick(); // re-render on store changes
@@ -16,16 +17,51 @@ export default function AdminDashboardPage() {
 
   const today = new Date();
   const thisMonth = toMonthKey(today);
-  const prevMonth = toMonthKey(new Date(today.getFullYear(), today.getMonth() - 1, 1));
 
-  const thisMonthEntries = useMemo(() => entries.filter((e) => entryInMonth(e.date, thisMonth)), [entries, thisMonth]);
-  const prevMonthEntries = useMemo(() => entries.filter((e) => entryInMonth(e.date, prevMonth)), [entries, prevMonth]);
+  // Scope drives every "this month" section on the page. Default to the
+  // current month so the dashboard opens on the same view it always has;
+  // users can pick an older month or "All time" via the chip row.
+  const [scope, setScope] = useState<MonthScope>(thisMonth);
 
-  const thisMonthTotal = thisMonthEntries.reduce((sum, e) => sum + e.total, 0);
-  const prevMonthTotal = prevMonthEntries.reduce((sum, e) => sum + e.total, 0);
-  const monthDelta = prevMonthTotal > 0 ? ((thisMonthTotal - prevMonthTotal) / prevMonthTotal) * 100 : 0;
+  // Months that actually have entries, newest first. Current month is always
+  // present so the chip strip never opens empty.
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of entries) set.add(toMonthKey(e.date));
+    set.add(thisMonth);
+    return Array.from(set).sort((a, b) => (a < b ? 1 : -1));
+  }, [entries, thisMonth]);
 
-  // Approval queue — what Lexi needs to act on
+  // Pretty label for headings: "All time" or "May 2026".
+  const scopeLabel = scope === "all" ? "All time" : monthLabel(scope);
+  const scopeShort = scope === "all" ? "All time" : monthLabel(scope).split(" ")[0];
+
+  // Entries within the selected scope (every section below filters from this).
+  const scopedEntries = useMemo(() => {
+    if (scope === "all") return entries;
+    return entries.filter((e) => entryInMonth(e.date, scope));
+  }, [entries, scope]);
+
+  // For the "vs prior" delta in the stat card we need the period before
+  // the selected one. With scope="all" there's nothing meaningful to compare
+  // against, so we just hide the delta.
+  const prevScopeKey = useMemo(() => {
+    if (scope === "all") return null;
+    const [y, m] = scope.split("-").map(Number);
+    return toMonthKey(new Date(y, m - 1 - 1, 1));
+  }, [scope]);
+  const prevScopeEntries = useMemo(() => {
+    if (!prevScopeKey) return [];
+    return entries.filter((e) => entryInMonth(e.date, prevScopeKey));
+  }, [entries, prevScopeKey]);
+
+  const scopeTotal = scopedEntries.reduce((sum, e) => sum + e.total, 0);
+  const prevScopeTotal = prevScopeEntries.reduce((sum, e) => sum + e.total, 0);
+  const scopeDelta =
+    prevScopeTotal > 0 ? ((scopeTotal - prevScopeTotal) / prevScopeTotal) * 100 : 0;
+
+  // Approval queue is always all-time — flagged items don't expire based on
+  // which month you're inspecting.
   const openFlagEntries = useMemo(
     () => entries.filter((e) => e.flags.some((f) => !f.resolved)),
     [entries],
@@ -36,45 +72,59 @@ export default function AdminDashboardPage() {
   );
   const reviewCount = openFlagEntries.length + pendingTopUps.length;
 
-  // Spend per staff member this month
+  // Spend per staff member in the selected scope.
   const byStaff = useMemo(() => {
     const map = new Map<string, { total: number; count: number }>();
-    for (const e of thisMonthEntries) {
+    for (const e of scopedEntries) {
       const cur = map.get(e.loggedBy) ?? { total: 0, count: 0 };
       map.set(e.loggedBy, { total: cur.total + e.total, count: cur.count + 1 });
     }
     return Array.from(map.entries())
       .map(([id, v]) => ({ id, name: getUserById(id)?.name ?? "—", ...v }))
       .sort((a, b) => b.total - a.total);
-  }, [thisMonthEntries]);
+  }, [scopedEntries]);
 
-  // Top categories this month
+  // Top categories in the selected scope.
   const categoryTotals = useMemo(() => {
     const map = new Map<string, number>();
-    for (const e of thisMonthEntries) {
+    for (const e of scopedEntries) {
       map.set(e.category, (map.get(e.category) ?? 0) + e.total);
     }
     return Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 4);
-  }, [thisMonthEntries]);
+  }, [scopedEntries]);
   const totalForCategoryView = categoryTotals.reduce((s, [, v]) => s + v, 0);
   const maxCategoryTotal = categoryTotals[0]?.[1] ?? 1;
 
   const lastApprovedTopUp = ledger.find((p) => p.kind === "top-up" && p.status === "approved");
 
-  // Month on month — last 5 months
+  // Month-on-month — 5 months ending at the selected scope (or at today when
+  // scope === "all", which preserves the original "last 5 months" view).
   const momData = useMemo(() => {
+    const anchor = scope === "all"
+      ? today
+      : (() => {
+          const [y, m] = scope.split("-").map(Number);
+          return new Date(y, m - 1, 1);
+        })();
     const months: { key: string; label: string; total: number; partial: boolean }[] = [];
     for (let i = 4; i >= 0; i--) {
-      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      const d = new Date(anchor.getFullYear(), anchor.getMonth() - i, 1);
       const key = toMonthKey(d);
-      const total = entries.filter((e) => entryInMonth(e.date, key)).reduce((s, e) => s + e.total, 0);
-      months.push({ key, label: monthLabel(key).split(" ")[0].slice(0, 3), total, partial: i === 0 });
+      const total = entries
+        .filter((e) => entryInMonth(e.date, key))
+        .reduce((s, e) => s + e.total, 0);
+      // "partial" highlights the latest bar — only meaningful when the chart
+      // ends at the current month.
+      const partial = i === 0 && key === thisMonth;
+      months.push({ key, label: monthLabel(key).split(" ")[0].slice(0, 3), total, partial });
     }
     return months;
-  }, [entries, today]);
+  }, [entries, scope, today, thisMonth]);
   const maxMonthTotal = Math.max(...momData.map((m) => m.total), 1);
 
-  const recentEntries = useMemo(() => entries.slice(0, 6), [entries]);
+  // Recent entries — restricted to scope so picking April shows April entries,
+  // not whatever the newest rows happen to be.
+  const recentEntries = useMemo(() => scopedEntries.slice(0, 6), [scopedEntries]);
 
   return (
     <div className="pb-2">
@@ -122,30 +172,44 @@ export default function AdminDashboardPage() {
         </Link>
       </div>
 
-      {/* This month */}
-      <div className="px-5 pt-5">
+      {/* Month-scope chips — drives every section below. The ← year separator
+          slips into the strip when chips cross into a previous calendar year
+          so the user has a visual cue they're scrolling into older data. */}
+      <div className="pt-4">
+        <p className="px-5 text-[11px] text-ink-500 mb-1">Showing data for</p>
+        <MonthChips scope={scope} onChange={setScope} availableMonths={availableMonths} />
+      </div>
+
+      {/* Stats card — title swaps with the scope. */}
+      <div className="px-5 pt-4">
         <div className="flex items-baseline justify-between mb-2">
-          <p className="text-sm font-medium text-ink-900">This month so far</p>
-          <p className="text-[11px] text-ink-300">{monthLabel(thisMonth)}</p>
+          <p className="text-sm font-medium text-ink-900">
+            {scope === "all"
+              ? "All time"
+              : scope === thisMonth
+              ? "This month so far"
+              : scopeLabel}
+          </p>
+          <p className="text-[11px] text-ink-300">{scopeLabel}</p>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div className="stat-card">
             <p className="text-[11px] text-ink-500">Total spent</p>
-            <p className="text-lg font-medium text-ink-900 mt-0.5">{peso(thisMonthTotal)}</p>
-            {prevMonthTotal > 0 && (
+            <p className="text-lg font-medium text-ink-900 mt-0.5">{peso(scopeTotal)}</p>
+            {prevScopeKey && prevScopeTotal > 0 && (
               <p className="text-[11px] text-ink-500 mt-0.5 flex items-center gap-1">
-                {monthDelta < 0 ? (
+                {scopeDelta < 0 ? (
                   <ArrowDownRight className="w-3 h-3 text-leaf-500" />
                 ) : (
                   <ArrowUpRight className="w-3 h-3 text-clay-500" />
                 )}
-                {Math.abs(monthDelta).toFixed(0)}% vs {monthLabel(prevMonth).split(" ")[0]}
+                {Math.abs(scopeDelta).toFixed(0)}% vs {monthLabel(prevScopeKey).split(" ")[0]}
               </p>
             )}
           </div>
           <div className="stat-card">
             <p className="text-[11px] text-ink-500">Entries logged</p>
-            <p className="text-lg font-medium text-ink-900 mt-0.5">{thisMonthEntries.length}</p>
+            <p className="text-lg font-medium text-ink-900 mt-0.5">{scopedEntries.length}</p>
             <p className="text-[11px] text-ink-500 mt-0.5">across {byStaff.length} staff</p>
           </div>
         </div>
@@ -154,7 +218,7 @@ export default function AdminDashboardPage() {
       {/* Spend by staff */}
       {byStaff.length > 0 && (
         <div className="px-5 pt-5">
-          <p className="text-sm font-medium text-ink-900 mb-2">Spend by staff — {monthLabel(thisMonth).split(" ")[0]}</p>
+          <p className="text-sm font-medium text-ink-900 mb-2">Spend by staff — {scopeShort}</p>
           <div className="space-y-1.5">
             {byStaff.map((s) => (
               <Link
@@ -177,7 +241,7 @@ export default function AdminDashboardPage() {
       {categoryTotals.length > 0 && (
         <div className="px-5 pt-5">
           <div className="flex items-baseline justify-between mb-2">
-            <p className="text-sm font-medium text-ink-900">Top categories — {monthLabel(thisMonth).split(" ")[0]}</p>
+            <p className="text-sm font-medium text-ink-900">Top categories — {scopeShort}</p>
             <Link href="/categories" className="text-[11px] text-ink-500">All ↗</Link>
           </div>
           <div className="space-y-2">
@@ -202,7 +266,8 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* Month on month */}
+      {/* Month on month — anchored to the selected month so picking February
+          shows October..February instead of always January..May. */}
       <div className="px-5 pt-5">
         <p className="text-sm font-medium text-ink-900 mb-2">Month on month</p>
         <div className="flex items-end gap-2 h-28">
@@ -222,36 +287,49 @@ export default function AdminDashboardPage() {
         </div>
       </div>
 
-      {/* Recent entries — whole team */}
+      {/* Recent entries — restricted to scope. The /entries link carries the
+          same scope through a query param so the user lands on the same
+          filter view they were inspecting. */}
       <div className="px-5 pt-5">
         <div className="flex items-baseline justify-between mb-2">
-          <p className="text-sm font-medium text-ink-900">Recent entries</p>
-          <Link href="/entries" className="text-[11px] text-ink-500">All ↗</Link>
+          <p className="text-sm font-medium text-ink-900">
+            Recent entries{scope !== "all" ? ` — ${scopeShort}` : ""}
+          </p>
+          <Link
+            href={scope === "all" ? "/entries" : `/entries?month=${scope}`}
+            className="text-[11px] text-ink-500"
+          >
+            All ↗
+          </Link>
         </div>
-        <div className="space-y-1.5">
-          {recentEntries.map((entry) => {
-            const hasOpenFlag = entry.flags.some((f) => !f.resolved);
-            const logger = getUserById(entry.loggedBy);
-            return (
-              <Link
-                key={entry.id}
-                href={`/entries/${entry.id}`}
-                className="flex items-center justify-between p-2.5 rounded-lg bg-white border border-sand-200 hover:bg-sand-50 transition-colors"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-ink-900 truncate">
-                    {hasOpenFlag && <AlertCircle className="w-3 h-3 text-clay-500 inline mr-1 -mt-0.5" />}
-                    {entry.vendor} · {entry.item}
-                  </p>
-                  <p className="text-[11px] text-ink-500 mt-0.5">
-                    {relativeDate(entry.date)} · {entry.category} · {logger?.name ?? "—"}
-                  </p>
-                </div>
-                <p className="text-sm font-medium text-ink-900 ml-3">{peso(entry.total)}</p>
-              </Link>
-            );
-          })}
-        </div>
+        {recentEntries.length === 0 ? (
+          <p className="text-xs text-ink-500 italic">No entries in {scopeLabel}.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {recentEntries.map((entry) => {
+              const hasOpenFlag = entry.flags.some((f) => !f.resolved);
+              const logger = getUserById(entry.loggedBy);
+              return (
+                <Link
+                  key={entry.id}
+                  href={`/entries/${entry.id}`}
+                  className="flex items-center justify-between p-2.5 rounded-lg bg-white border border-sand-200 hover:bg-sand-50 transition-colors"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-ink-900 truncate">
+                      {hasOpenFlag && <AlertCircle className="w-3 h-3 text-clay-500 inline mr-1 -mt-0.5" />}
+                      {entry.vendor} · {entry.item}
+                    </p>
+                    <p className="text-[11px] text-ink-500 mt-0.5">
+                      {relativeDate(entry.date)} · {entry.category} · {logger?.name ?? "—"}
+                    </p>
+                  </div>
+                  <p className="text-sm font-medium text-ink-900 ml-3">{peso(entry.total)}</p>
+                </Link>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Pending top-ups awaiting approval */}

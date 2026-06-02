@@ -7,11 +7,11 @@ import { AlertCircle, Plus, Search, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { getEntries, getUserById } from "@/lib/store";
-import { entryInMonth, monthLabel, peso, relativeDate, toMonthKey } from "@/lib/format";
+import { entryInMonth, peso, relativeDate, toMonthKey } from "@/lib/format";
 import { staffCategoryLabel } from "@/lib/category-meta";
+import { MonthChips, type MonthScope } from "@/components/MonthChips";
 
 type Filter = "all" | "mine" | "flagged";
-type MonthScope = "all" | string; // "all" or a YYYY-MM key
 
 export default function StaffEntriesPage() {
   useStoreTick();
@@ -24,10 +24,11 @@ export default function StaffEntriesPage() {
   // categories breakdown page. They're cleared with the "X" chip in the header.
   const categoryFilter = searchParams.get("category");
   const staffIdFilter = searchParams.get("staffId");
+  const monthParam = searchParams.get("month"); // YYYY-MM, carried from dashboard chips
   const staffFilterUser = staffIdFilter ? getUserById(staffIdFilter) : null;
 
   const [filter, setFilter] = useState<Filter>("all");
-  const [monthScope, setMonthScope] = useState<MonthScope>("all");
+  const [monthScope, setMonthScope] = useState<MonthScope>(monthParam ?? "all");
   const [query, setQuery] = useState("");
 
   const allEntries = getEntries();
@@ -150,36 +151,11 @@ export default function StaffEntriesPage() {
 
       {/* Month scope chips — date range filter, useful when drilling into a
           category to see e.g. "Coffee spend in April" vs the all-time view. */}
-      <div className="px-5 pt-2 flex gap-2 overflow-x-auto">
-        <button
-          onClick={() => setMonthScope("all")}
-          className={
-            "px-3 h-7 rounded-full text-[11px] font-medium whitespace-nowrap transition-colors " +
-            (monthScope === "all"
-              ? "bg-leaf-500 text-white"
-              : "bg-sand-100 text-ink-700 hover:bg-sand-200")
-          }
-        >
-          All time
-        </button>
-        {availableMonths.map((key) => {
-          const active = monthScope === key;
-          return (
-            <button
-              key={key}
-              onClick={() => setMonthScope(key)}
-              className={
-                "px-3 h-7 rounded-full text-[11px] font-medium whitespace-nowrap transition-colors " +
-                (active
-                  ? "bg-leaf-500 text-white"
-                  : "bg-sand-100 text-ink-700 hover:bg-sand-200")
-              }
-            >
-              {monthLabel(key).split(" ")[0]} {monthLabel(key).split(" ")[1].slice(2)}
-            </button>
-          );
-        })}
-      </div>
+      <MonthChips
+        scope={monthScope}
+        onChange={setMonthScope}
+        availableMonths={availableMonths}
+      />
 
       {/* Filtered total — helps the user see the impact of their filters */}
       {(categoryFilter || staffIdFilter || monthScope !== "all" || filter !== "all" || query) && (
