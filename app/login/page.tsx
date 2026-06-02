@@ -4,9 +4,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Hotel, User as UserIcon, ShieldCheck } from "lucide-react";
 import { getUsers } from "@/lib/store";
+import { useStoreTick } from "@/lib/useStoreTick";
 import { login } from "@/lib/auth";
 
 export default function LoginPage() {
+  useStoreTick();
   const router = useRouter();
   const users = getUsers();
   const [selectedName, setSelectedName] = useState<string | null>(null);
