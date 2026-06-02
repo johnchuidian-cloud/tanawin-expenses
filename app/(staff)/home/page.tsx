@@ -9,7 +9,7 @@ import { getEntries, getPcfBalance, getPcfLedger, getUserById } from "@/lib/stor
 import { peso, pesoShort, relativeDate, toMonthKey, entryInMonth, monthLabel } from "@/lib/format";
 import { staffCategoryLabel } from "@/lib/category-meta";
 import type { Category } from "@/lib/types";
-import { MonthChips, type MonthScope } from "@/components/MonthChips";
+import { MonthGrid, type MonthScope } from "@/components/MonthGrid";
 
 export default function StaffHomePage() {
   useStoreTick(); // re-render on store changes
@@ -152,10 +152,11 @@ export default function StaffHomePage() {
         </Link>
       </div>
 
-      {/* Month-scope chips — drives every section below. */}
+      {/* Month-scope grid — phone-keypad layout so staff tap directly into
+          the month they want without scrolling. */}
       <div className="pt-4">
         <p className="px-5 text-[11px] text-ink-500 mb-1">Showing data for</p>
-        <MonthChips scope={scope} onChange={setScope} availableMonths={availableMonths} />
+        <MonthGrid scope={scope} onChange={setScope} availableMonths={availableMonths} />
       </div>
 
       {/* Stats card */}

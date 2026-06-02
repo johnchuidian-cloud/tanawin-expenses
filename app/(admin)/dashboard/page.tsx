@@ -7,7 +7,7 @@ import { useStoreTick } from "@/lib/useStoreTick";
 import { getEntries, getPcfBalance, getPcfLedger, getUserById } from "@/lib/store";
 import { peso, pesoShort, relativeDate, toMonthKey, entryInMonth, monthLabel } from "@/lib/format";
 import ExportButton from "@/components/ExportButton";
-import { MonthChips, type MonthScope } from "@/components/MonthChips";
+import { MonthGrid, type MonthScope } from "@/components/MonthGrid";
 
 export default function AdminDashboardPage() {
   useStoreTick(); // re-render on store changes
@@ -172,12 +172,12 @@ export default function AdminDashboardPage() {
         </Link>
       </div>
 
-      {/* Month-scope chips — drives every section below. The ← year separator
-          slips into the strip when chips cross into a previous calendar year
-          so the user has a visual cue they're scrolling into older data. */}
+      {/* Month-scope grid — drives every section below. Phone-keypad layout
+          so users tap directly into the month they want; year arrows on top
+          row jump between years when data spans more than one. */}
       <div className="pt-4">
         <p className="px-5 text-[11px] text-ink-500 mb-1">Showing data for</p>
-        <MonthChips scope={scope} onChange={setScope} availableMonths={availableMonths} />
+        <MonthGrid scope={scope} onChange={setScope} availableMonths={availableMonths} />
       </div>
 
       {/* Stats card — title swaps with the scope. */}
