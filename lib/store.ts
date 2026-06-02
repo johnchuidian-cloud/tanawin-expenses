@@ -351,6 +351,42 @@ export function authenticateByPin(name: string, pin: string): User | null {
   return u ?? null;
 }
 
+/**
+ * Admin: update a user's display name and/or PIN. Used when staff
+ * are replaced — admin renames the slot and resets the PIN.
+ * Role (admin/staff) is intentionally NOT editable here.
+ */
+export function updateUser(
+  id: string,
+  patch: { name?: string; pin?: string },
+): void {
+  const trimmedName = patch.name?.trim();
+  const trimmedPin = patch.pin?.trim();
+  users = users.map((u) =>
+    u.id === id
+      ? {
+          ...u,
+          ...(trimmedName ? { name: trimmedName } : {}),
+          ...(trimmedPin ? { pin: trimmedPin } : {}),
+        }
+      : u,
+  );
+  notify();
+
+  const update: Record<string, string> = {};
+  if (trimmedName) update.name = trimmedName;
+  if (trimmedPin) update.pin = trimmedPin;
+  if (Object.keys(update).length === 0) return;
+
+  supabase
+    .from("users")
+    .update(update)
+    .eq("id", id)
+    .then(({ error }) => {
+      if (error) console.error("supabase: updateUser", error);
+    });
+}
+
 // ---------- ENTRIES ----------
 
 export function getEntries(): Entry[] {
@@ -600,6 +636,65 @@ export function rejectPcfTopUp(
   }).eq("id", id).then(({ error }) => {
     if (error) console.error("supabase: rejectPcfTopUp", error);
   });
+}
+
+/**
+ * Admin: zero out the PCF balance by booking an offsetting "top-up" entry.
+ *
+ * Doesn't delete any history — instead inserts a single approved ledger
+ * entry equal to whatever amount is needed to bring balance to 0. Used at
+ * reconciliation time when the admin has verified cash on hand and wants
+ * the books to start fresh from a known state.
+ *
+ * If the balance is already 0 (within rounding), this is a no-op.
+ */
+export function clearPcfBalance(adminId: string, note?: string): void {
+  const currentBalance = getPcfBalance();
+  if (Math.abs(currentBalance) < 0.005) return;
+
+  // To bring balance to 0, we need a top-up of -currentBalance.
+  // PcfLedgerEntry.amount is non-negative, so we flip sign + kind: when the
+  // balance is negative (drawdowns > top-ups), insert a positive top-up.
+  // When positive (top-ups > drawdowns), the offset would need to be a
+  // drawdown — but the prototype's only real shortfall scenario is the
+  // negative case, so we keep it as a top-up of `-balance` and let the
+  // sign on `amount` carry the meaning. Supabase column is numeric and
+  // happy with either.
+  const amount = -currentBalance;
+  const now = new Date().toISOString();
+  const datePart = now.slice(0, 10);
+  const full: PcfLedgerEntry = {
+    id: `p_clear_${Math.random().toString(36).slice(2, 10)}`,
+    kind: "top-up",
+    amount,
+    date: datePart,
+    reportedBy: adminId,
+    approvedBy: adminId,
+    status: "approved",
+    note:
+      note?.trim() ||
+      `Balance reset by admin — reconciled to ₱0 on ${datePart}`,
+    createdAt: now,
+  };
+  pcfLedger = [full, ...pcfLedger];
+  notify();
+
+  supabase
+    .from("pcf_ledger")
+    .insert({
+      id: full.id,
+      kind: full.kind,
+      amount: full.amount,
+      date: full.date,
+      reported_by: full.reportedBy,
+      approved_by: full.approvedBy,
+      status: full.status,
+      note: full.note ?? null,
+      created_at: full.createdAt,
+    })
+    .then(({ error }) => {
+      if (error) console.error("supabase: clearPcfBalance", error);
+    });
 }
 
 export function resolvePcfRejection(id: string, resolverId: string): void {

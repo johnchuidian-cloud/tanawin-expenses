@@ -42,10 +42,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               logout();
               router.replace("/login");
             }}
-            aria-label="Sign out"
-            className="w-9 h-9 rounded-lg flex items-center justify-center hover:bg-sand-100"
+            aria-label="Sign out or change user"
+            className="flex flex-col items-center justify-center px-2 py-1 rounded-lg hover:bg-sand-100"
           >
             <UserIcon className="w-4 h-4 text-ink-700" />
+            <span className="text-[9px] text-ink-500 mt-0.5 leading-none">Sign out</span>
           </button>
         </div>
       </header>

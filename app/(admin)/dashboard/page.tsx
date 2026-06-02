@@ -2,18 +2,33 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { AlertCircle, ArrowDownRight, ArrowUpRight, Clock, Plus } from "lucide-react";
+import { AlertCircle, ArrowDownRight, ArrowUpRight, Clock, Plus, RotateCcw, UserCog } from "lucide-react";
+import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
-import { getEntries, getPcfBalance, getPcfLedger, getUserById } from "@/lib/store";
+import { clearPcfBalance, getEntries, getPcfBalance, getPcfLedger, getUserById } from "@/lib/store";
 import { peso, pesoShort, relativeDate, toMonthKey, entryInMonth, monthLabel } from "@/lib/format";
 import ExportButton from "@/components/ExportButton";
 import { MonthGrid, type MonthScope } from "@/components/MonthGrid";
 
 export default function AdminDashboardPage() {
   useStoreTick(); // re-render on store changes
+  const me = useCurrentUser();
   const entries = getEntries();
   const ledger = getPcfLedger();
   const balance = getPcfBalance();
+
+  function handleClearPcfBalance() {
+    if (!me) return;
+    const formatted = peso(balance);
+    const ok = window.confirm(
+      `Clear the petty cash balance?\n\nCurrent balance is ${formatted}. ` +
+        `This books a reconciliation entry that resets the balance to ₱0 without ` +
+        `deleting any history. Going forward, top-ups and entries will start ` +
+        `tracking from zero.`,
+    );
+    if (!ok) return;
+    clearPcfBalance(me.id);
+  }
 
   const today = new Date();
   const thisMonth = toMonthKey(today);
@@ -142,6 +157,14 @@ export default function AdminDashboardPage() {
           </div>
           <ExportButton variant="sm" />
         </div>
+        <button
+          onClick={handleClearPcfBalance}
+          className="mt-3 inline-flex items-center gap-1.5 px-3 h-8 rounded-lg bg-white border border-leaf-200 text-leaf-600 text-xs font-medium hover:bg-leaf-100 transition-colors"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+          Clear PCF balance
+          <span className="text-[10px] text-leaf-600/70">(reset to ₱0)</span>
+        </button>
       </div>
 
       {/* Review queue */}
@@ -330,6 +353,35 @@ export default function AdminDashboardPage() {
             })}
           </div>
         )}
+      </div>
+
+      {/* Admin tools — places only Lexi reaches: edit staff PINs/names,
+          edit category list, etc. Surfaced here so they're discoverable
+          without bloating the bottom nav. */}
+      <div className="px-5 pt-5">
+        <p className="text-sm font-medium text-ink-900 mb-2">Admin tools</p>
+        <div className="grid grid-cols-2 gap-2">
+          <Link
+            href="/users/manage"
+            className="flex items-center gap-2 p-3 rounded-lg bg-white border border-sand-200 hover:bg-sand-50 transition-colors"
+          >
+            <UserCog className="w-4 h-4 text-ink-700 flex-shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-ink-900">Manage staff</p>
+              <p className="text-[10px] text-ink-500 leading-tight">Rename · change PIN</p>
+            </div>
+          </Link>
+          <Link
+            href="/categories/manage"
+            className="flex items-center gap-2 p-3 rounded-lg bg-white border border-sand-200 hover:bg-sand-50 transition-colors"
+          >
+            <span className="text-base">🏷️</span>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-ink-900">Manage tags</p>
+              <p className="text-[10px] text-ink-500 leading-tight">Add · delete · edit</p>
+            </div>
+          </Link>
+        </div>
       </div>
 
       {/* Pending top-ups awaiting approval */}
