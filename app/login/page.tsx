@@ -49,7 +49,7 @@ export default function LoginPage() {
             alt="Tanawin"
             className="w-20 h-20 rounded-2xl shadow-sm mb-3"
           />
-          <h1 className="text-xl font-medium text-ink-900">Tanawin Expenses</h1>
+          <h1 className="text-xl font-medium text-ink-900">Tanawin Operating Expenses</h1>
           <p className="text-xs text-ink-500 mt-1">Tanawin Bed and Breakfast</p>
         </div>
 

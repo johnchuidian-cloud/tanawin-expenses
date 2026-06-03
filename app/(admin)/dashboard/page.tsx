@@ -147,7 +147,7 @@ export default function AdminDashboardPage() {
   return (
     <div className="pb-2">
       {/* Tanawin wordmark — brand band at the top of the home screen */}
-      <div className="flex justify-center py-3 bg-white border-b border-sand-200">
+      <div className="flex flex-col items-center py-3 bg-white border-b border-sand-200">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/tanawin-wordmark.jpg"
@@ -160,6 +160,9 @@ export default function AdminDashboardPage() {
           alt="Tanawin"
           className="h-7"
         />
+        <p className="text-[11px] tracking-wide text-ink-500 mt-1">
+          Operating Expenses
+        </p>
       </div>
 
       {/* PCF balance card */}

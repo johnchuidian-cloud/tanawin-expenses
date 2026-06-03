@@ -1,4 +1,4 @@
-# Tanawin Expenses — Prototype v0.1
+# Tanawin Operating Expenses — Prototype v0.1
 
 Mobile-first expense tracker for Tanawin Bed and Breakfast.
 
