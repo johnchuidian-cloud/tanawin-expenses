@@ -52,6 +52,18 @@ export default function AdminGalleryPage() {
     [rows],
   );
 
+  // Photos attached directly to entries (via the New/Edit entry flows).
+  // These aren't "receipts" in the scan sense, so they get their own section
+  // — otherwise a receipt photographed straight onto an entry would be
+  // invisible here.
+  const entriesWithPhotos = useMemo(
+    () =>
+      entries
+        .filter((e) => (e.photoUrls?.length ?? (e.photoUrl ? 1 : 0)) > 0)
+        .sort((a, b) => (a.date < b.date ? 1 : -1)),
+    [entries],
+  );
+
   return (
     <div className="pb-4">
       {/* Header */}
@@ -158,6 +170,63 @@ export default function AdminGalleryPage() {
               </Link>
             );
           })}
+        </div>
+      )}
+
+      {/* Photos attached directly to entries */}
+      {entriesWithPhotos.length > 0 && (
+        <div className="px-5 pt-6">
+          <p className="text-sm font-medium text-ink-900">
+            Receipts on entries · {entriesWithPhotos.length}
+          </p>
+          <p className="text-[11px] text-ink-500 mt-0.5 mb-3">
+            Photos added straight to an expense entry (not via Scan).
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            {entriesWithPhotos.map((e) => {
+              const logger = getUserById(e.loggedBy);
+              const pics = e.photoUrls ?? (e.photoUrl ? [e.photoUrl] : []);
+              return (
+                <Link
+                  key={e.id}
+                  href={`/entries/${e.id}`}
+                  className="rounded-lg bg-white border border-sand-200 overflow-hidden hover:border-sand-300 transition-colors"
+                >
+                  <div className="aspect-square bg-sand-100 relative flex items-center justify-center overflow-hidden">
+                    {pics[0] ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={pics[0]}
+                        alt={`Receipt for ${e.vendor}`}
+                        className="w-full h-full object-cover"
+                        onError={(ev) => {
+                          (ev.target as HTMLImageElement).style.display = "none";
+                        }}
+                      />
+                    ) : (
+                      <ImageIcon className="w-8 h-8 text-ink-300" />
+                    )}
+                    {pics.length > 1 && (
+                      <span className="absolute top-1.5 right-1.5 text-[10px] font-medium bg-ink-900/80 text-white rounded-full px-1.5 py-0.5">
+                        {pics.length}
+                      </span>
+                    )}
+                  </div>
+                  <div className="p-2.5">
+                    <p className="text-xs font-medium text-ink-900 truncate">
+                      {e.vendor}
+                    </p>
+                    <p className="text-[11px] text-ink-500 mt-0.5">
+                      {relativeDate(e.date)} · {peso(e.total)}
+                    </p>
+                    <p className="text-[10px] text-ink-500 mt-0.5">
+                      {logger?.name ?? "—"} · {e.item}
+                    </p>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

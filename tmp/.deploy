@@ -12,3 +12,4 @@ trigger
 2026-06-03b — rename app to "Tanawin Operating Expenses"
 2026-06-03c — add/replace/remove receipt photo on the entry detail page
 2026-06-03d — full Edit-entry page (fields + recomputed flags)
+2026-06-03e — multi-receipt manager, edit history, gallery shows entry photos

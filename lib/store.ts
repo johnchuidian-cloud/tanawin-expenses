@@ -3,6 +3,7 @@
 import { supabase } from "./supabase";
 import { BUILTIN_CATEGORIES } from "./types";
 import type {
+  AuditRecord,
   Category,
   CategoryDef,
   Entry,
@@ -145,7 +146,57 @@ function mapReceipt(row: Record<string, unknown>): Receipt {
   };
 }
 
+/**
+ * Entry "media" — the receipt photos plus the edit-history log — are packed
+ * into the single existing `photo_url` text column as a small JSON blob.
+ *
+ * Why overload one column instead of adding `photo_urls` / `history`
+ * columns? This environment can only reach Supabase through PostgREST
+ * (the anon/service keys), which can't run DDL — so adding columns isn't
+ * possible here. The `photo_url` column on `entries` is read nowhere except
+ * mapEntry (verified), so packing structured JSON into it is safe.
+ *
+ * Stored shapes we accept on read (newest first):
+ *   '{"v":1,"photos":[...],"history":[...]}'  — current format
+ *   '["dataurl", ...]'                          — photos-only array
+ *   'data:image/...'                            — legacy single photo
+ *   '' / null                                   — nothing
+ */
+function parseEntryMedia(raw: unknown): { photoUrls: string[]; history: AuditRecord[] } {
+  if (typeof raw !== "string" || raw.length === 0) return { photoUrls: [], history: [] };
+  const s = raw.trim();
+  if (s.startsWith("{")) {
+    try {
+      const o = JSON.parse(s) as { photos?: unknown; history?: unknown };
+      return {
+        photoUrls: Array.isArray(o.photos) ? (o.photos as string[]) : [],
+        history: Array.isArray(o.history) ? (o.history as AuditRecord[]) : [],
+      };
+    } catch {
+      return { photoUrls: [], history: [] };
+    }
+  }
+  if (s.startsWith("[")) {
+    try {
+      const a = JSON.parse(s);
+      return { photoUrls: Array.isArray(a) ? (a as string[]) : [], history: [] };
+    } catch {
+      return { photoUrls: [s], history: [] };
+    }
+  }
+  return { photoUrls: [s], history: [] };
+}
+
+/** Pack photos + history back into the JSON blob stored in `photo_url`. */
+function serializeEntryMedia(photoUrls: string[], history: AuditRecord[]): string | null {
+  if ((!photoUrls || photoUrls.length === 0) && (!history || history.length === 0)) {
+    return null;
+  }
+  return JSON.stringify({ v: 1, photos: photoUrls ?? [], history: history ?? [] });
+}
+
 function mapEntry(row: Record<string, unknown>): Entry {
+  const media = parseEntryMedia(row.photo_url);
   return {
     id: row.id as string,
     date: row.date as string,
@@ -158,11 +209,13 @@ function mapEntry(row: Record<string, unknown>): Entry {
     paidFrom: row.paid_from as Entry["paidFrom"],
     majorRepair: (row.major_repair ?? false) as boolean,
     receiptId: row.receipt_id as string | undefined,
-    photoUrl: row.photo_url as string | undefined,
+    photoUrl: media.photoUrls[0], // legacy single accessor
+    photoUrls: media.photoUrls,
     loggedBy: row.logged_by as string,
     createdAt: row.created_at as string,
     flags: (row.flags ?? []) as Entry["flags"],
     notes: (row.notes ?? []) as Entry["notes"],
+    history: media.history,
   };
 }
 
@@ -458,8 +511,15 @@ export function getEntriesByUser(userId: string): Entry[] {
 }
 
 export function addEntry(entry: Omit<Entry, "id" | "createdAt">): Entry {
+  // Normalise incoming photos: a caller may pass a single photoUrl (legacy)
+  // or a photoUrls array. Everything is stored as the media blob.
+  const photos = entry.photoUrls ?? (entry.photoUrl ? [entry.photoUrl] : []);
+  const history = entry.history ?? [];
   const full: Entry = {
     ...entry,
+    photoUrls: photos,
+    photoUrl: photos[0],
+    history,
     id: `e_${Math.random().toString(36).slice(2, 10)}`,
     createdAt: new Date().toISOString(),
   };
@@ -478,7 +538,7 @@ export function addEntry(entry: Omit<Entry, "id" | "createdAt">): Entry {
     paid_from: full.paidFrom,
     major_repair: full.majorRepair ?? false,
     receipt_id: full.receiptId ?? null,
-    photo_url: full.photoUrl ?? null,
+    photo_url: serializeEntryMedia(photos, history),
     logged_by: full.loggedBy,
     created_at: full.createdAt,
     flags: full.flags,
@@ -494,6 +554,9 @@ export function updateEntry(id: string, updates: Partial<Entry>): void {
   entries = entries.map((e) => (e.id === id ? { ...e, ...updates } : e));
   notify();
 
+  // NOTE: photos and history live in the packed `photo_url` blob and are
+  // written only via setEntryPhotos / appendEntryHistory — never here — so a
+  // field edit can't accidentally clobber the receipt photos or audit log.
   const dbUpdates: Record<string, unknown> = {};
   if (updates.date !== undefined) dbUpdates.date = updates.date;
   if (updates.vendor !== undefined) dbUpdates.vendor = updates.vendor;
@@ -505,13 +568,58 @@ export function updateEntry(id: string, updates: Partial<Entry>): void {
   if (updates.paidFrom !== undefined) dbUpdates.paid_from = updates.paidFrom;
   if (updates.majorRepair !== undefined) dbUpdates.major_repair = updates.majorRepair;
   if (updates.receiptId !== undefined) dbUpdates.receipt_id = updates.receiptId;
-  if (updates.photoUrl !== undefined) dbUpdates.photo_url = updates.photoUrl;
   if (updates.flags !== undefined) dbUpdates.flags = updates.flags;
   if (updates.notes !== undefined) dbUpdates.notes = updates.notes;
 
+  if (Object.keys(dbUpdates).length === 0) return;
   supabase.from("entries").update(dbUpdates).eq("id", id).then(({ error }) => {
     if (error) console.error("supabase: updateEntry", error);
   });
+}
+
+/**
+ * Replace the full set of receipt photos on an entry (used by the entry
+ * detail receipt manager: add, replace, delete then Save). Optionally
+ * records an audit entry describing the change.
+ */
+export function setEntryPhotos(
+  id: string,
+  photoUrls: string[],
+  record?: AuditRecord,
+): void {
+  const cur = entries.find((e) => e.id === id);
+  if (!cur) return;
+  const history = record ? [...(cur.history ?? []), record] : cur.history ?? [];
+  entries = entries.map((e) =>
+    e.id === id ? { ...e, photoUrls, photoUrl: photoUrls[0], history } : e,
+  );
+  notify();
+
+  supabase
+    .from("entries")
+    .update({ photo_url: serializeEntryMedia(photoUrls, history) })
+    .eq("id", id)
+    .then(({ error }) => {
+      if (error) console.error("supabase: setEntryPhotos", error);
+    });
+}
+
+/** Append one audit record to an entry's edit history. */
+export function appendEntryHistory(id: string, record: AuditRecord): void {
+  const cur = entries.find((e) => e.id === id);
+  if (!cur) return;
+  const history = [...(cur.history ?? []), record];
+  const photoUrls = cur.photoUrls ?? (cur.photoUrl ? [cur.photoUrl] : []);
+  entries = entries.map((e) => (e.id === id ? { ...e, history } : e));
+  notify();
+
+  supabase
+    .from("entries")
+    .update({ photo_url: serializeEntryMedia(photoUrls, history) })
+    .eq("id", id)
+    .then(({ error }) => {
+      if (error) console.error("supabase: appendEntryHistory", error);
+    });
 }
 
 export function addNoteToEntry(

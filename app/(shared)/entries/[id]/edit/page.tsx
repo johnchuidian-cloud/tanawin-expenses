@@ -8,7 +8,13 @@ import { useParams, useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, Check, RefreshCw, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
-import { getCategoryDefs, getEntries, getEntryById, updateEntry } from "@/lib/store";
+import {
+  appendEntryHistory,
+  getCategoryDefs,
+  getEntries,
+  getEntryById,
+  updateEntry,
+} from "@/lib/store";
 import { peso, toIsoDate } from "@/lib/format";
 import type { Category, Entry, Flag, PaymentSource, User } from "@/lib/types";
 import { iconFor } from "@/lib/category-meta";
@@ -20,8 +26,9 @@ export default function EditEntryPage() {
   const me = useCurrentUser();
   const entry = getEntryById(params.id);
 
-  // Loading: session not yet resolved.
-  if (me === undefined) {
+  // Loading (undefined) or logged out (null) — the shared layout redirects
+  // logged-out users, so just hold here. After this guard `me` is a User.
+  if (!me) {
     return (
       <div className="px-5 py-10 text-center text-sm text-ink-500">Loading…</div>
     );
@@ -159,6 +166,8 @@ function EditEntryForm({ entry, me }: { entry: Entry; me: User }) {
         : nf;
     });
 
+    const effectiveMajor = category === "Maintenance" ? majorRepair : false;
+
     updateEntry(entry.id, {
       date,
       vendor: vendor.trim(),
@@ -170,9 +179,28 @@ function EditEntryForm({ entry, me }: { entry: Entry; me: User }) {
       paidFrom,
       // Explicit false (not undefined) so switching away from Maintenance
       // clears a previously-set major-repair flag.
-      majorRepair: category === "Maintenance" ? majorRepair : false,
+      majorRepair: effectiveMajor,
       flags: merged,
     });
+
+    // Record what changed in the entry's edit history.
+    const changes: string[] = [];
+    if (entry.vendor !== vendor.trim()) changes.push("vendor");
+    if (entry.item !== item.trim()) changes.push("item");
+    if (entry.qty !== numericQty) changes.push("qty");
+    if (entry.unitPrice !== numericUnit) changes.push("unit price");
+    if (Math.abs(entry.total - displayedTotal) > 0.005) changes.push("total");
+    if (entry.category !== category) changes.push("category");
+    if (entry.paidFrom !== paidFrom) changes.push("fund source");
+    if (!!entry.majorRepair !== effectiveMajor) changes.push("major repair");
+    if (entry.date !== date) changes.push("date");
+    if (changes.length > 0) {
+      appendEntryHistory(entry.id, {
+        at: new Date().toISOString(),
+        by: me.id,
+        summary: `Edited ${changes.join(", ")}`,
+      });
+    }
 
     router.replace(`/entries/${entry.id}`);
   }

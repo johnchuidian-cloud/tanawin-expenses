@@ -105,11 +105,24 @@ export interface Entry {
   paidFrom: PaymentSource; // explicit funding source — drives PCF balance math
   majorRepair?: boolean; // only meaningful for Maintenance
   receiptId?: string; // optional link to a receipt
-  photoUrl?: string; // optional item photo (e.g., broken aircon)
+  photoUrl?: string; // first receipt photo (legacy single-photo accessor)
+  photoUrls?: string[]; // all receipt photos attached to this entry
   loggedBy: string; // user ID
   createdAt: string; // ISO timestamp
   flags: Flag[];
   notes: Note[];
+  history?: AuditRecord[]; // edit log — appended on field edits and receipt changes
+}
+
+/**
+ * One entry in an entry's edit history. `summary` is a short human-readable
+ * description of what changed, e.g. "Edited vendor, total" or
+ * "Added a receipt photo (now 2)".
+ */
+export interface AuditRecord {
+  at: string; // ISO timestamp
+  by: string; // user ID who made the change
+  summary: string;
 }
 
 export type FlagKind = "arithmetic" | "duplicate" | "outlier" | "missing-category";
