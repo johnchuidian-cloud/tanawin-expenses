@@ -3,23 +3,26 @@
 export const runtime = "edge";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   AlertCircle,
   ArrowLeft,
   Check,
   ImageIcon,
+  ImagePlus,
   Landmark,
   MessageSquare,
   Send,
   Wallet,
   Wrench,
+  X,
 } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
-import { addNoteToEntry, getEntryById, getUserById } from "@/lib/store";
+import { addNoteToEntry, getEntryById, getUserById, updateEntry } from "@/lib/store";
 import { formatDate, formatDateTime, peso } from "@/lib/format";
+import { fileToCompressedDataUrl } from "@/lib/image";
 import { staffCategoryLabel } from "@/lib/category-meta";
 import type { FlagKind } from "@/lib/types";
 
@@ -49,6 +52,30 @@ export default function StaffEntryDetailPage() {
 
   const [reply, setReply] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  async function handlePhoto(file: File) {
+    if (!entry) return;
+    setPhotoBusy(true);
+    try {
+      const compressed = await fileToCompressedDataUrl(file);
+      // Auto-saves to the store + Supabase, same as adding a note.
+      updateEntry(entry.id, { photoUrl: compressed });
+    } catch {
+      window.alert("Couldn't read that image. Try another photo.");
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
+  function handleRemovePhoto() {
+    if (!entry) return;
+    const ok = window.confirm("Remove the receipt photo from this entry?");
+    if (!ok) return;
+    // Empty string clears it: the display guard treats it as "no photo".
+    updateEntry(entry.id, { photoUrl: "" });
+  }
 
   if (!entry) {
     return (
@@ -138,28 +165,80 @@ export default function StaffEntryDetailPage() {
         </div>
       </div>
 
-      {/* Receipt photo, if one was attached when logging the entry */}
-      {entry.photoUrl && (
-        <div className="px-5 pt-4">
-          <p className="text-sm font-medium text-ink-900 mb-2 flex items-center gap-1.5">
-            <ImageIcon className="w-4 h-4 text-ink-500" /> Receipt photo
-          </p>
-          <a
-            href={entry.photoUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block rounded-lg border border-sand-200 bg-white overflow-hidden"
+      {/* Receipt photo — view, add, replace, or remove. Lets someone attach a
+          receipt after the fact when the entry was logged without one. */}
+      <div className="px-5 pt-4">
+        <p className="text-sm font-medium text-ink-900 mb-2 flex items-center gap-1.5">
+          <ImageIcon className="w-4 h-4 text-ink-500" /> Receipt photo
+        </p>
+        {entry.photoUrl ? (
+          <>
+            <a
+              href={entry.photoUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block rounded-lg border border-sand-200 bg-white overflow-hidden"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={entry.photoUrl}
+                alt={`Receipt for ${entry.vendor}`}
+                className="w-full max-h-96 object-contain bg-sand-50"
+              />
+            </a>
+            <div className="flex items-center justify-between mt-1.5">
+              <p className="text-[11px] text-ink-500">Tap the photo to open full size.</p>
+              <div className="flex items-center gap-4">
+                <button
+                  type="button"
+                  onClick={() => fileInput.current?.click()}
+                  disabled={photoBusy}
+                  className="text-xs text-leaf-600 inline-flex items-center gap-1 disabled:opacity-60"
+                >
+                  <ImagePlus className="w-3.5 h-3.5" />
+                  {photoBusy ? "Saving…" : "Replace"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRemovePhoto}
+                  disabled={photoBusy}
+                  className="text-xs text-ink-500 inline-flex items-center gap-1 disabled:opacity-60"
+                >
+                  <X className="w-3.5 h-3.5" /> Remove
+                </button>
+              </div>
+            </div>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={() => fileInput.current?.click()}
+            disabled={photoBusy}
+            className="w-full rounded-lg border-2 border-dashed border-sand-200 bg-sand-50 hover:bg-sand-100 transition-colors flex flex-col items-center justify-center text-center p-5 disabled:opacity-60"
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={entry.photoUrl}
-              alt={`Receipt for ${entry.vendor}`}
-              className="w-full max-h-96 object-contain bg-sand-50"
-            />
-          </a>
-          <p className="text-[11px] text-ink-500 mt-1">Tap the photo to open full size.</p>
-        </div>
-      )}
+            <ImagePlus className="w-7 h-7 text-ink-300 mb-1.5" />
+            <p className="text-sm font-medium text-ink-900">
+              {photoBusy ? "Processing photo…" : "Add receipt photo"}
+            </p>
+            <p className="text-[11px] text-ink-500 mt-0.5">
+              No photo yet — upload from your gallery or take one now
+            </p>
+          </button>
+        )}
+        {/* No `capture` attribute → phones show the full picker (gallery,
+            camera, files) instead of jumping straight to the camera. */}
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) handlePhoto(file);
+            e.target.value = "";
+          }}
+        />
+      </div>
 
       {/* Flags */}
       {openFlags.length > 0 && (
