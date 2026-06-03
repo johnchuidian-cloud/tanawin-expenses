@@ -117,7 +117,7 @@ export default function StaffHomePage() {
       <div className="flex justify-center py-3 bg-white border-b border-sand-200">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/tanawin-wordmark.png"
+          src="/tanawin-wordmark.jpg"
           onError={(e) => {
             const img = e.currentTarget;
             if (!img.src.endsWith("/tanawin-wordmark.svg")) {

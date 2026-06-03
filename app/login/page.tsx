@@ -38,9 +38,9 @@ export default function LoginPage() {
         <div className="flex flex-col items-center mb-8">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/tanawin-icon.png"
+            src="/tanawin-icon.jpg"
             onError={(e) => {
-              // Fall back to the SVG placeholder until the official PNG is added.
+              // Fall back to the SVG rendering if the official art is missing.
               const img = e.currentTarget;
               if (!img.src.endsWith("/tanawin-icon.svg")) {
                 img.src = "/tanawin-icon.svg";
