@@ -11,3 +11,4 @@ trigger
 2026-06-03a — official Tanawin logo JPEGs swapped in for SVG placeholders
 2026-06-03b — rename app to "Tanawin Operating Expenses"
 2026-06-03c — add/replace/remove receipt photo on the entry detail page
+2026-06-03d — full Edit-entry page (fields + recomputed flags)

@@ -13,6 +13,7 @@ import {
   ImagePlus,
   Landmark,
   MessageSquare,
+  Pencil,
   Send,
   Wallet,
   Wrench,
@@ -94,6 +95,8 @@ export default function StaffEntryDetailPage() {
   const logger = getUserById(entry.loggedBy);
   const openFlags = entry.flags.filter((f) => !f.resolved);
   const resolvedFlags = entry.flags.filter((f) => f.resolved);
+  // Admins can edit any entry; staff can edit the ones they logged.
+  const canEdit = me?.role === "admin" || me?.id === entry.loggedBy;
 
   function handleSendReply() {
     if (!myId || !entry) return;
@@ -118,7 +121,15 @@ export default function StaffEntryDetailPage() {
         >
           <ArrowLeft className="w-4 h-4 text-ink-700" />
         </button>
-        <p className="text-base font-medium text-ink-900">Entry</p>
+        <p className="text-base font-medium text-ink-900 flex-1">Entry</p>
+        {canEdit && (
+          <Link
+            href={`/entries/${entry.id}/edit`}
+            className="btn btn-sm bg-white border-sand-200 text-ink-700"
+          >
+            <Pencil className="w-3.5 h-3.5" /> Edit
+          </Link>
+        )}
       </div>
 
       {/* Entry summary */}
