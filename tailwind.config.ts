@@ -5,9 +5,9 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Warm resort-inspired palette to match Tanawin's identity.
-        // 'sand' for surfaces, 'leaf' for accents, 'clay' for warnings,
-        // 'ink' for text. Deliberately limited; ramps are functional, not decorative.
+        // Official Tanawin palette: maroon, beige, white (drawn from the logo).
+        // 'sand' = beige surfaces, 'maroon' = brand accent, 'clay' = warnings,
+        // 'ink' = text. Deliberately limited; ramps are functional, not decorative.
         sand: {
           50: "#FBFAF6",
           100: "#F4F1E7",
@@ -16,14 +16,27 @@ const config: Config = {
           400: "#B9A874",
           500: "#9A8650",
         },
+        // Brand maroon, sampled from the Tanawin logo (500 ≈ the logo tile).
+        maroon: {
+          50: "#FBF0EC",
+          100: "#F1D4C9",
+          200: "#E0A593",
+          300: "#CC7459",
+          400: "#B14C2E",
+          500: "#9A3518",
+          600: "#7C2A12",
+        },
+        // `leaf` is the former (green) accent token. Kept as an alias of maroon
+        // so the 80+ existing `leaf-*` classes retheme in one place instead of
+        // a 23-file sweep. Prefer `maroon-*` in new code.
         leaf: {
-          50: "#EDF4ED",
-          100: "#CFE0CF",
-          200: "#A8C8A8",
-          300: "#7BA97B",
-          400: "#558555",
-          500: "#3F6840",
-          600: "#2C4B2D",
+          50: "#FBF0EC",
+          100: "#F1D4C9",
+          200: "#E0A593",
+          300: "#CC7459",
+          400: "#B14C2E",
+          500: "#9A3518",
+          600: "#7C2A12",
         },
         clay: {
           50: "#FBEEE7",

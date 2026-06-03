@@ -113,6 +113,22 @@ export default function StaffHomePage() {
 
   return (
     <div className="pb-2">
+      {/* Tanawin wordmark — brand band at the top of the home screen */}
+      <div className="flex justify-center py-3 bg-white border-b border-sand-200">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/tanawin-wordmark.png"
+          onError={(e) => {
+            const img = e.currentTarget;
+            if (!img.src.endsWith("/tanawin-wordmark.svg")) {
+              img.src = "/tanawin-wordmark.svg";
+            }
+          }}
+          alt="Tanawin"
+          className="h-7"
+        />
+      </div>
+
       {/* PCF balance card */}
       <div className="bg-leaf-50 px-5 py-4 border-b border-sand-200">
         <p className="text-xs text-leaf-600">Pooled petty cash balance</p>

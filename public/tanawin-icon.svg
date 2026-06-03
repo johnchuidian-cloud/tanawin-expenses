@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" role="img" aria-label="Tanawin">
+  <!-- App-tile logo: maroon background, cream wordmark + flower.
+       Placeholder rendering in the app font; replace with the official
+       PNG artwork at /tanawin-icon.png when available. -->
+  <rect width="500" height="500" rx="96" fill="#9A3518"/>
+  <!-- Flower mark above the wordmark -->
+  <g transform="translate(335 188)" fill="#F1E4D6">
+    <g>
+      <ellipse cx="0" cy="-20" rx="6.5" ry="16"/>
+      <ellipse cx="0" cy="-20" rx="6.5" ry="16" transform="rotate(60)"/>
+      <ellipse cx="0" cy="-20" rx="6.5" ry="16" transform="rotate(120)"/>
+      <ellipse cx="0" cy="-20" rx="6.5" ry="16" transform="rotate(180)"/>
+      <ellipse cx="0" cy="-20" rx="6.5" ry="16" transform="rotate(240)"/>
+      <ellipse cx="0" cy="-20" rx="6.5" ry="16" transform="rotate(300)"/>
+    </g>
+    <circle cx="0" cy="0" r="6" fill="#9A3518"/>
+  </g>
+  <text x="250" y="300" text-anchor="middle"
+        font-family="'Nunito','Quicksand','Segoe UI',system-ui,sans-serif"
+        font-size="104" font-weight="600" fill="#F1E4D6" letter-spacing="1">Tanawin</text>
+</svg>

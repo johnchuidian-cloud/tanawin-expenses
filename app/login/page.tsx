@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Hotel, User as UserIcon, ShieldCheck } from "lucide-react";
+import { User as UserIcon, ShieldCheck } from "lucide-react";
 import { getUsers } from "@/lib/store";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { login } from "@/lib/auth";
@@ -36,9 +36,19 @@ export default function LoginPage() {
     <div className="min-h-screen flex flex-col items-center justify-center px-6 py-12 bg-sand-50">
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center mb-8">
-          <div className="w-12 h-12 rounded-full bg-leaf-500 flex items-center justify-center mb-3">
-            <Hotel className="w-6 h-6 text-white" />
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/tanawin-icon.png"
+            onError={(e) => {
+              // Fall back to the SVG placeholder until the official PNG is added.
+              const img = e.currentTarget;
+              if (!img.src.endsWith("/tanawin-icon.svg")) {
+                img.src = "/tanawin-icon.svg";
+              }
+            }}
+            alt="Tanawin"
+            className="w-20 h-20 rounded-2xl shadow-sm mb-3"
+          />
           <h1 className="text-xl font-medium text-ink-900">Tanawin Expenses</h1>
           <p className="text-xs text-ink-500 mt-1">Tanawin Bed and Breakfast</p>
         </div>
