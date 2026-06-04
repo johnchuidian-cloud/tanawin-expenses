@@ -40,6 +40,7 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/pcf", label: "PCF", icon: Wallet },
   { href: "/new", label: "New", icon: PlusCircle },
   { href: "/categories", label: "Tags", icon: Tags },
+  { href: "/notes", label: "Notes", icon: FileText },
   { href: "/review", label: "Review", icon: AlertCircle },
   { href: "/rejections", label: "Rejected", icon: XCircle },
   { href: "/gallery", label: "Gallery", icon: ImageIcon },
@@ -51,6 +52,7 @@ const COL_CLASS: Record<number, string> = {
   5: "grid-cols-5",
   6: "grid-cols-6",
   7: "grid-cols-7",
+  8: "grid-cols-8",
 };
 
 export default function BottomNav({ role }: { role: Role }) {
