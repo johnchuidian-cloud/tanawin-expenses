@@ -27,6 +27,7 @@ import { useStoreTick } from "@/lib/useStoreTick";
 import { addNoteToEntry, getEntryById, getUserById, setEntryPhotos } from "@/lib/store";
 import { formatDate, formatDateTime, peso } from "@/lib/format";
 import { fileToCompressedDataUrl } from "@/lib/image";
+import { ImageLightbox } from "@/components/ImageLightbox";
 import { staffCategoryLabel } from "@/lib/category-meta";
 import type { FlagKind } from "@/lib/types";
 
@@ -64,6 +65,7 @@ export default function StaffEntryDetailPage() {
   const [photos, setPhotos] = useState<string[]>([]);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [photoDirty, setPhotoDirty] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
 
   const entryPhotos = useMemo(
     () => entry?.photoUrls ?? (entry?.photoUrl ? [entry.photoUrl] : []),
@@ -237,14 +239,19 @@ export default function StaffEntryDetailPage() {
                 key={idx}
                 className="relative group rounded-lg border border-sand-200 bg-sand-50 overflow-hidden aspect-square"
               >
-                <a href={src} target="_blank" rel="noopener noreferrer">
+                <button
+                  type="button"
+                  onClick={() => setLightbox(src)}
+                  className="block w-full h-full"
+                  aria-label={`View receipt ${idx + 1} full size`}
+                >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={src}
                     alt={`Receipt ${idx + 1} for ${entry.vendor}`}
                     className="w-full h-full object-cover"
                   />
-                </a>
+                </button>
                 <button
                   type="button"
                   onClick={() => handleDeletePhoto(idx)}
@@ -479,6 +486,14 @@ export default function StaffEntryDetailPage() {
           <Send className="w-3.5 h-3.5" /> Send note
         </button>
       </div>
+
+      {lightbox && (
+        <ImageLightbox
+          src={lightbox}
+          alt={`Receipt for ${entry.vendor}`}
+          onClose={() => setLightbox(null)}
+        />
+      )}
     </div>
   );
 }
