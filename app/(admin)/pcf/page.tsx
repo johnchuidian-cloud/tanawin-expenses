@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -47,10 +47,14 @@ export default function AdminPcfPage() {
     [entries],
   );
 
-  const recentDrawdowns = useMemo(
-    () => [...pcfEntries].sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 10),
+  // All PCF drawdowns, newest first. Shown in growing pages via "Show more"
+  // so Lexi can scan well past the most recent few without filtering.
+  const sortedDrawdowns = useMemo(
+    () => [...pcfEntries].sort((a, b) => (a.date < b.date ? 1 : -1)),
     [pcfEntries],
   );
+  const [drawdownLimit, setDrawdownLimit] = useState(30);
+  const recentDrawdowns = sortedDrawdowns.slice(0, drawdownLimit);
 
   const totals = useMemo(() => {
     const approvedTotal = ledger
@@ -203,12 +207,14 @@ export default function AdminPcfPage() {
         )}
       </section>
 
-      {/* Recent drawdowns */}
+      {/* Drawdowns */}
       <section className="px-5 pt-5">
         <div className="flex items-baseline justify-between mb-2">
-          <p className="text-sm font-medium text-ink-900">Recent drawdowns</p>
-          <Link href="/dashboard" className="text-[11px] text-ink-500">
-            All ↗
+          <p className="text-sm font-medium text-ink-900">
+            Drawdowns{sortedDrawdowns.length > 0 ? ` · ${sortedDrawdowns.length}` : ""}
+          </p>
+          <Link href="/entries" className="text-[11px] text-ink-500">
+            All entries ↗
           </Link>
         </div>
         <p className="text-[11px] text-ink-500 mb-2">
@@ -242,6 +248,19 @@ export default function AdminPcfPage() {
             );
           })}
         </div>
+        {sortedDrawdowns.length > drawdownLimit && (
+          <button
+            onClick={() => setDrawdownLimit((n) => n + 30)}
+            className="btn btn-sm w-full mt-2 text-ink-700"
+          >
+            Show more · {sortedDrawdowns.length - drawdownLimit} older
+          </button>
+        )}
+        {sortedDrawdowns.length > 0 && (
+          <p className="text-[11px] text-ink-300 mt-2 text-center">
+            Showing {recentDrawdowns.length} of {sortedDrawdowns.length} drawdowns
+          </p>
+        )}
       </section>
     </div>
   );
