@@ -165,7 +165,7 @@ export default function StaffHomePage() {
 
       {/* Primary action */}
       <div className="px-5 pt-4">
-        <Link href="/scan" className="btn-primary w-full h-13 text-base">
+        <Link href="/new" className="btn-primary w-full h-13 text-base">
           <Plus className="w-5 h-5" />
           Log new expense
         </Link>

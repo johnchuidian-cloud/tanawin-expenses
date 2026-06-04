@@ -708,6 +708,118 @@ export function updateReceiptStatus(id: string, status: Receipt["status"]): void
   });
 }
 
+/**
+ * Log a whole purchase in one go: one receipt (photo stored once) plus a
+ * line-item Entry per item, each linked to that receipt. This is what the
+ * "Log new expense" screen calls — it's why staff no longer have to
+ * re-upload the same receipt for every item.
+ *
+ * `receiptTotal` is the optional printed total for the verify-against-receipt
+ * check; when omitted it defaults to the sum of the line items (so the
+ * receipt reconciles cleanly).
+ */
+export function addPurchase(input: {
+  vendor: string;
+  date: string;
+  photoUrl?: string;
+  paidFrom: Entry["paidFrom"];
+  capturedBy: string;
+  receiptTotal?: number;
+  items: Array<{
+    item: string;
+    qty: number;
+    unitPrice: number;
+    total: number;
+    category: string;
+    majorRepair?: boolean;
+    flags: Entry["flags"];
+  }>;
+}): { receipt: Receipt; entries: Entry[] } {
+  const sum = input.items.reduce((s, it) => s + it.total, 0);
+  const totalTyped = input.receiptTotal ?? sum;
+  const diff = sum - totalTyped;
+  const status: Receipt["status"] =
+    Math.abs(diff) <= 0.5 ? "reconciled" : diff < 0 ? "unfinished" : "mismatch";
+
+  const now = new Date().toISOString();
+  const receipt: Receipt = {
+    id: `r_${Math.random().toString(36).slice(2, 10)}`,
+    vendor: input.vendor,
+    date: input.date,
+    photoUrl: input.photoUrl ?? "",
+    totalTyped,
+    capturedBy: input.capturedBy,
+    status,
+  };
+  const created: Entry[] = input.items.map((it) => ({
+    id: `e_${Math.random().toString(36).slice(2, 10)}`,
+    date: input.date,
+    vendor: input.vendor,
+    item: it.item,
+    qty: it.qty,
+    unitPrice: it.unitPrice,
+    total: it.total,
+    category: it.category,
+    paidFrom: input.paidFrom,
+    majorRepair: it.majorRepair,
+    receiptId: receipt.id,
+    photoUrls: [],
+    loggedBy: input.capturedBy,
+    createdAt: now,
+    flags: it.flags,
+    notes: [],
+    history: [],
+  }));
+
+  // Update in-memory state immediately so the UI is instant.
+  receipts = [receipt, ...receipts];
+  entries = [...created, ...entries];
+  notify();
+
+  // Persist in order: the entries' receipt_id has a foreign key to
+  // receipts.id, so the receipt row MUST exist before the entries insert —
+  // otherwise the FK rejects them. Await the receipt, then the entries.
+  (async () => {
+    const { error: rErr } = await supabase.from("receipts").insert({
+      id: receipt.id,
+      vendor: receipt.vendor,
+      date: receipt.date,
+      photo_url: receipt.photoUrl,
+      ocr_text: null,
+      total_typed: receipt.totalTyped,
+      captured_by: receipt.capturedBy,
+      status: receipt.status,
+    });
+    if (rErr) {
+      console.error("supabase: addPurchase receipt", rErr);
+      return;
+    }
+    const { error: eErr } = await supabase.from("entries").insert(
+      created.map((e) => ({
+        id: e.id,
+        date: e.date,
+        vendor: e.vendor,
+        item: e.item,
+        qty: e.qty,
+        unit_price: e.unitPrice,
+        total: e.total,
+        category: e.category,
+        paid_from: e.paidFrom,
+        major_repair: e.majorRepair ?? false,
+        receipt_id: e.receiptId ?? null,
+        photo_url: null,
+        logged_by: e.loggedBy,
+        created_at: e.createdAt,
+        flags: e.flags,
+        notes: e.notes,
+      })),
+    );
+    if (eErr) console.error("supabase: addPurchase entries", eErr);
+  })();
+
+  return { receipt, entries: created };
+}
+
 // ---------- PCF LEDGER ----------
 
 export function getPcfLedger(): PcfLedgerEntry[] {

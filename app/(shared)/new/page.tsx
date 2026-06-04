@@ -1,15 +1,22 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { AlertCircle, ArrowLeft, Check, ImagePlus, Lightbulb, RefreshCw, X } from "lucide-react";
-import { useCurrentUser } from "@/lib/auth";
+import { useRouter } from "next/navigation";
 import {
-  addEntry,
-  addNoteToEntry,
-  getCategoryDefs,
-  getEntries,
-} from "@/lib/store";
+  AlertCircle,
+  ArrowLeft,
+  Camera,
+  Check,
+  ImagePlus,
+  Lightbulb,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Trash2,
+  X,
+} from "lucide-react";
+import { useCurrentUser } from "@/lib/auth";
+import { addPurchase, getCategoryDefs, getEntries } from "@/lib/store";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { peso, toIsoDate } from "@/lib/format";
 import { fileToCompressedDataUrl } from "@/lib/image";
@@ -18,40 +25,127 @@ import { iconFor, staffCategoryLabel } from "@/lib/category-meta";
 import { suggestCategory } from "@/lib/category-hints";
 import { flagsForEntry, suggestsMajorRepair } from "@/lib/validation";
 
-export default function StaffNewEntryPage() {
-  useStoreTick(); // re-render when categories are added/removed
+interface LineItem {
+  id: string;
+  item: string;
+  qty: number;
+  unitPrice: number;
+  total: number;
+  category: Category;
+  majorRepair: boolean;
+}
+
+function newId() {
+  return Math.random().toString(36).slice(2, 9);
+}
+
+export default function NewPurchasePage() {
+  useStoreTick();
   const router = useRouter();
-  const searchParams = useSearchParams();
   const me = useCurrentUser();
   const categoryDefs = getCategoryDefs();
 
-  // When /new is opened from a scanned receipt, pre-fill vendor/date and
-  // remember the receipt id so we link the new entry back and return there.
-  const presetReceiptId = searchParams.get("receiptId");
-  const presetVendor = searchParams.get("vendor") ?? "";
-  const presetDate = searchParams.get("date") ?? toIsoDate();
+  // ---- Shared purchase fields ----
+  const [vendor, setVendor] = useState("");
+  const [date, setDate] = useState(toIsoDate());
+  const [paidFrom, setPaidFrom] = useState<PaymentSource>("pcf");
+  const [photo, setPhoto] = useState<string | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [receiptTotal, setReceiptTotal] = useState("");
+  const cameraInput = useRef<HTMLInputElement>(null);
+  const uploadInput = useRef<HTMLInputElement>(null);
 
-  const [date, setDate] = useState(presetDate);
-  const [vendor, setVendor] = useState(presetVendor);
-  const [item, setItem] = useState("");
+  // ---- Line items already added ----
+  const [items, setItems] = useState<LineItem[]>([]);
+
+  // ---- The item currently being entered/edited ----
+  const [editId, setEditId] = useState<string | null>(null);
+  const [itemName, setItemName] = useState("");
   const [qty, setQty] = useState("1");
   const [unitPrice, setUnitPrice] = useState("");
   const [totalOverride, setTotalOverride] = useState<string | null>(null);
   const [category, setCategory] = useState<Category | "">("");
   const [majorRepair, setMajorRepair] = useState(false);
-  const [paidFrom, setPaidFrom] = useState<PaymentSource>("pcf");
-  const [paidFromAutoSuggested, setPaidFromAutoSuggested] = useState(false);
-  const [note, setNote] = useState("");
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
-  const [photoBusy, setPhotoBusy] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
+
+  const numQty = Number(qty) || 0;
+  const numUnit = Number(unitPrice) || 0;
+  const computedTotal = numQty * numUnit;
+  const editorTotal = totalOverride !== null ? Number(totalOverride) || 0 : computedTotal;
+  const totalIsOverridden = totalOverride !== null && editorTotal !== computedTotal;
+
+  const suggestion = useMemo(() => suggestCategory(vendor, itemName), [vendor, itemName]);
+  const showSuggestion = !!suggestion && category === "";
+
+  const suggestMajor = useMemo(
+    () => category === "Maintenance" && suggestsMajorRepair(category, editorTotal),
+    [category, editorTotal],
+  );
+
+  const itemsTotal = items.reduce((s, it) => s + it.total, 0);
+  const receiptTotalNum = receiptTotal.trim() ? Number(receiptTotal) || 0 : null;
+  const totalMismatch =
+    receiptTotalNum !== null && items.length > 0 && Math.abs(itemsTotal - receiptTotalNum) > 0.5;
+
+  function clearEditor() {
+    setEditId(null);
+    setItemName("");
+    setQty("1");
+    setUnitPrice("");
+    setTotalOverride(null);
+    setCategory("");
+    setMajorRepair(false);
+  }
+
+  function handleCategoryChange(next: Category | "") {
+    setCategory(next);
+    // Utilities are usually a bank transfer — nudge the whole purchase once.
+    if (next === "Utilities" && paidFrom === "pcf") setPaidFrom("other");
+  }
+
+  function commitItem() {
+    if (!itemName.trim()) return setError("Item name is required.");
+    if (numQty <= 0) return setError("Quantity must be greater than zero.");
+    if (numUnit <= 0) return setError("Unit price must be greater than zero.");
+    if (!category) return setError("Pick a tag for this item.");
+    setError(null);
+
+    const li: LineItem = {
+      id: editId ?? newId(),
+      item: itemName.trim(),
+      qty: numQty,
+      unitPrice: numUnit,
+      total: editorTotal,
+      category,
+      majorRepair: category === "Maintenance" ? majorRepair : false,
+    };
+    setItems((list) =>
+      editId ? list.map((x) => (x.id === editId ? li : x)) : [...list, li],
+    );
+    clearEditor();
+  }
+
+  function editItem(li: LineItem) {
+    setEditId(li.id);
+    setItemName(li.item);
+    setQty(String(li.qty));
+    setUnitPrice(String(li.unitPrice));
+    setTotalOverride(li.total !== li.qty * li.unitPrice ? String(li.total) : null);
+    setCategory(li.category);
+    setMajorRepair(li.majorRepair);
+    setError(null);
+  }
+
+  function deleteItem(id: string) {
+    setItems((list) => list.filter((x) => x.id !== id));
+    if (editId === id) clearEditor();
+  }
 
   async function handlePhoto(file: File) {
     setPhotoBusy(true);
     try {
-      const compressed = await fileToCompressedDataUrl(file);
-      setPhotoUrl(compressed);
+      setPhoto(await fileToCompressedDataUrl(file));
     } catch {
       setError("Couldn't read that image. Try another photo.");
     } finally {
@@ -59,147 +153,49 @@ export default function StaffNewEntryPage() {
     }
   }
 
-  function handleCategoryChange(next: Category | "") {
-    setCategory(next);
-    // Utilities are usually paid by bank transfer — nudge but don't force.
-    // The user can override either way; we only auto-suggest once so we
-    // don't fight a deliberate change back.
-    if (next === "Utilities" && paidFrom === "pcf" && !paidFromAutoSuggested) {
-      setPaidFrom("other");
-      setPaidFromAutoSuggested(true);
-    }
-  }
-
-  const numericQty = Number(qty) || 0;
-  const numericUnit = Number(unitPrice) || 0;
-  const computedTotal = numericQty * numericUnit;
-  const displayedTotal =
-    totalOverride !== null ? Number(totalOverride) || 0 : computedTotal;
-  const totalIsOverridden = totalOverride !== null && displayedTotal !== computedTotal;
-
-  // Preview flags as the user types — same validation logic that fires on save.
-  const previewFlags = useMemo(() => {
-    if (!vendor.trim() || !item.trim() || numericQty <= 0 || numericUnit <= 0) {
-      return [];
-    }
-    if (!category) return [];
-    return flagsForEntry(
-      {
-        date,
-        vendor: vendor.trim(),
-        item: item.trim(),
-        qty: numericQty,
-        unitPrice: numericUnit,
-        total: displayedTotal,
-        category,
-      },
-      getEntries(),
-    ).filter((f) => f.kind !== "missing-category");
-  }, [
-    date,
-    vendor,
-    item,
-    numericQty,
-    numericUnit,
-    displayedTotal,
-    category,
-  ]);
-
-  const suggestMajor = useMemo(
-    () => category === "Maintenance" && suggestsMajorRepair(category, displayedTotal),
-    [category, displayedTotal],
-  );
-
-  // Smart category suggestion — keyword match on vendor + item.
-  // Only shows when no category is picked yet; once the user taps any
-  // category we step out of the way (their pick beats our guess).
-  const suggestion = useMemo(
-    () => suggestCategory(vendor, item),
-    [vendor, item],
-  );
-  const showSuggestion = !!suggestion && category === "";
-
-  function handleSubmit() {
+  function handleSave() {
     if (!me) return;
-    if (!vendor.trim() || !item.trim()) {
-      setError("Vendor and item are required.");
-      return;
-    }
-    if (numericQty <= 0) {
-      setError("Quantity must be greater than zero.");
-      return;
-    }
-    if (numericUnit <= 0) {
-      setError("Unit price must be greater than zero.");
-      return;
-    }
-    if (!category) {
-      setError("Please choose a category.");
-      return;
-    }
-    if (!date) {
-      setError("Pick a date.");
-      return;
-    }
+    if (!vendor.trim()) return setError("Vendor is required.");
+    if (!date) return setError("Pick a date.");
+    if (items.length === 0) return setError("Add at least one item.");
 
-    const flags = flagsForEntry(
-      {
-        date,
-        vendor: vendor.trim(),
-        item: item.trim(),
-        qty: numericQty,
-        unitPrice: numericUnit,
-        total: displayedTotal,
-        category,
-      },
-      getEntries(),
-    ).filter((f) => f.kind !== "missing-category");
+    const history = getEntries();
+    const purchaseItems = items.map((li) => ({
+      item: li.item,
+      qty: li.qty,
+      unitPrice: li.unitPrice,
+      total: li.total,
+      category: li.category,
+      majorRepair: li.category === "Maintenance" ? li.majorRepair : undefined,
+      flags: flagsForEntry(
+        {
+          date,
+          vendor: vendor.trim(),
+          item: li.item,
+          qty: li.qty,
+          unitPrice: li.unitPrice,
+          total: li.total,
+          category: li.category,
+        },
+        history,
+      ).filter((f) => f.kind !== "missing-category"),
+    }));
 
-    const entry = addEntry({
-      date,
+    addPurchase({
       vendor: vendor.trim(),
-      item: item.trim(),
-      qty: numericQty,
-      unitPrice: numericUnit,
-      total: displayedTotal,
-      category,
+      date,
+      photoUrl: photo ?? undefined,
       paidFrom,
-      majorRepair: category === "Maintenance" ? majorRepair : undefined,
-      receiptId: presetReceiptId ?? undefined,
-      photoUrl: photoUrl ?? undefined,
-      loggedBy: me.id,
-      flags,
-      notes: [],
+      capturedBy: me.id,
+      receiptTotal: receiptTotalNum ?? undefined,
+      items: purchaseItems,
     });
 
-    // Optional context note — gets attached as a regular comment so it shows
-    // up in the entry's conversation thread and on the admin review card if
-    // the entry ends up flagged. Especially useful for pre-explaining
-    // unusual amounts (Lexi asked me to stock up, market price was high
-    // today, etc.) so admin doesn't have to ask later.
-    const trimmedNote = note.trim();
-    if (trimmedNote.length > 0) {
-      addNoteToEntry(entry.id, {
-        authorId: me.id,
-        body: trimmedNote,
-        kind: "comment",
-      });
-    }
-
-    // If this entry was logged against a receipt, return to that receipt so
-    // staff can keep adding line items and watch the reconciliation status
-    // update. Otherwise, go back to the home screen (role-appropriate) —
-    // that's where people expect to land after saving, and it avoids any
-    // edge-case bounce when the entry detail page mounts.
-    if (presetReceiptId) {
-      router.replace(`/scan/${presetReceiptId}`);
-    } else {
-      router.replace(me.role === "admin" ? "/dashboard" : "/home");
-    }
+    router.replace(me.role === "admin" ? "/dashboard" : "/home");
   }
 
   return (
-    <div className="pb-8">
+    <div className="pb-10">
       {/* Header */}
       <div className="px-5 pt-4 pb-3 border-b border-sand-200 flex items-center gap-2">
         <button
@@ -212,45 +208,57 @@ export default function StaffNewEntryPage() {
         <div>
           <p className="text-base font-medium text-ink-900">Log new expense</p>
           <p className="text-[11px] text-ink-500">
-            One line item per entry — receipts can group entries later
+            One receipt, as many tagged items as you need
           </p>
         </div>
       </div>
 
-      <div className="px-5 pt-5 space-y-4">
-        {presetReceiptId && (
-          <div className="rounded-lg bg-sand-50 border border-sand-200 p-3 text-xs text-ink-700">
-            Adding a line item to receipt{" "}
-            <span className="font-medium">{presetVendor || "—"}</span>. Saving
-            will return you to the receipt so you can keep adding items.
+      <div className="px-5 pt-5 space-y-5">
+        {/* Vendor + date */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2">
+            <label htmlFor="vendor" className="label">Vendor / store</label>
+            <input
+              id="vendor"
+              type="text"
+              value={vendor}
+              onChange={(e) => setVendor(e.target.value)}
+              placeholder="e.g. Puregold"
+              className="input"
+              autoComplete="off"
+            />
           </div>
-        )}
+          <div className="col-span-2">
+            <label htmlFor="date" className="label">Date</label>
+            <input
+              id="date"
+              type="date"
+              value={date}
+              max={toIsoDate()}
+              onChange={(e) => setDate(e.target.value)}
+              className="input"
+            />
+          </div>
+        </div>
 
-        {/* Receipt photo (optional). No `capture` attribute → on phones the OS
-            shows the full picker (Photo Library / Take Photo / Files) instead
-            of jumping straight to the camera, so uploading from the gallery
-            works. */}
+        {/* Receipt photo — explicit Take photo / Upload choice */}
         <div>
           <p className="label">Receipt photo (optional)</p>
-          {photoUrl ? (
+          {photo ? (
             <div className="rounded-lg border border-leaf-300 bg-leaf-50/40 p-3 flex flex-col items-center">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={photoUrl}
-                alt="Receipt preview"
-                className="max-h-56 rounded object-contain"
-              />
+              <img src={photo} alt="Receipt preview" className="max-h-48 rounded object-contain" />
               <div className="flex items-center gap-4 mt-2">
                 <button
                   type="button"
-                  onClick={() => fileInput.current?.click()}
+                  onClick={() => uploadInput.current?.click()}
                   className="text-xs text-leaf-600 inline-flex items-center gap-1"
                 >
                   <ImagePlus className="w-3.5 h-3.5" /> Replace
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPhotoUrl(null)}
+                  onClick={() => setPhoto(null)}
                   className="text-xs text-ink-500 inline-flex items-center gap-1"
                 >
                   <X className="w-3.5 h-3.5" /> Remove
@@ -258,183 +266,269 @@ export default function StaffNewEntryPage() {
               </div>
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={() => fileInput.current?.click()}
-              disabled={photoBusy}
-              className="w-full rounded-lg border-2 border-dashed border-sand-200 bg-sand-50 hover:bg-sand-100 transition-colors flex flex-col items-center justify-center text-center p-5 disabled:opacity-60"
-            >
-              <ImagePlus className="w-7 h-7 text-ink-300 mb-1.5" />
-              <p className="text-sm font-medium text-ink-900">
-                {photoBusy ? "Processing photo…" : "Add receipt photo"}
-              </p>
-              <p className="text-[11px] text-ink-500 mt-0.5">
-                Upload from your gallery or take a photo
-              </p>
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => cameraInput.current?.click()}
+                disabled={photoBusy}
+                className="rounded-lg border border-sand-200 bg-white hover:bg-sand-50 transition-colors flex flex-col items-center justify-center text-center py-4 disabled:opacity-60"
+              >
+                <Camera className="w-6 h-6 text-ink-700 mb-1" />
+                <span className="text-sm font-medium text-ink-900">
+                  {photoBusy ? "Processing…" : "Take photo"}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => uploadInput.current?.click()}
+                disabled={photoBusy}
+                className="rounded-lg border border-sand-200 bg-white hover:bg-sand-50 transition-colors flex flex-col items-center justify-center text-center py-4 disabled:opacity-60"
+              >
+                <ImagePlus className="w-6 h-6 text-ink-700 mb-1" />
+                <span className="text-sm font-medium text-ink-900">Upload</span>
+              </button>
+            </div>
           )}
+          {/* capture="environment" forces the camera; the upload input omits it
+              so it opens the gallery/files picker. */}
           <input
-            ref={fileInput}
+            ref={cameraInput}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handlePhoto(f);
+              e.target.value = "";
+            }}
+          />
+          <input
+            ref={uploadInput}
             type="file"
             accept="image/*"
             className="hidden"
             onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handlePhoto(file);
-              // Reset so picking the same file again still fires onChange.
+              const f = e.target.files?.[0];
+              if (f) handlePhoto(f);
               e.target.value = "";
             }}
           />
         </div>
 
-        <div>
-          <label htmlFor="vendor" className="label">Vendor</label>
-          <input
-            id="vendor"
-            type="text"
-            value={vendor}
-            onChange={(e) => setVendor(e.target.value)}
-            placeholder="e.g. Puregold"
-            className="input"
-            autoComplete="off"
-          />
-        </div>
-
-        <div>
-          <label htmlFor="item" className="label">Item</label>
-          <input
-            id="item"
-            type="text"
-            value={item}
-            onChange={(e) => setItem(e.target.value)}
-            placeholder="e.g. Rice 5kg"
-            className="input"
-            autoComplete="off"
-          />
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
+        {/* Items already added */}
+        {items.length > 0 && (
           <div>
-            <label htmlFor="qty" className="label">Qty</label>
-            <input
-              id="qty"
-              type="text"
-              inputMode="decimal"
-              value={qty}
-              onChange={(e) => {
-                setQty(e.target.value.replace(/[^\d.]/g, ""));
-                setTotalOverride(null);
-              }}
-              className="input"
-            />
+            <p className="label">Items on this receipt · {items.length}</p>
+            <div className="space-y-1.5">
+              {items.map((li) => {
+                const Icon = iconFor(li.category);
+                const isEditing = editId === li.id;
+                return (
+                  <div
+                    key={li.id}
+                    className={
+                      "flex items-center gap-2 p-2.5 rounded-lg border " +
+                      (isEditing
+                        ? "border-leaf-300 bg-leaf-50/40"
+                        : "border-sand-200 bg-white")
+                    }
+                  >
+                    <div className="w-8 h-8 rounded-lg bg-sand-100 flex items-center justify-center flex-shrink-0">
+                      <Icon className="w-4 h-4 text-ink-700" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-ink-900 truncate">{li.item}</p>
+                      <p className="text-[11px] text-ink-500">
+                        {li.qty} × {peso(li.unitPrice, { cents: true })} · {li.category}
+                      </p>
+                    </div>
+                    <p className="text-sm font-medium text-ink-900">{peso(li.total)}</p>
+                    <button
+                      type="button"
+                      onClick={() => editItem(li)}
+                      aria-label="Edit item"
+                      className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-sand-100"
+                    >
+                      <Pencil className="w-3.5 h-3.5 text-ink-500" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteItem(li.id)}
+                      aria-label="Delete item"
+                      className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-clay-50"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-clay-500" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex justify-between text-xs mt-2 px-1">
+              <span className="text-ink-500">Items total</span>
+              <span className="font-medium text-ink-900">{peso(itemsTotal)}</span>
+            </div>
           </div>
-          <div>
-            <label htmlFor="unitPrice" className="label">Unit price (₱)</label>
-            <input
-              id="unitPrice"
-              type="text"
-              inputMode="decimal"
-              value={unitPrice}
-              onChange={(e) => {
-                setUnitPrice(e.target.value.replace(/[^\d.]/g, ""));
-                setTotalOverride(null);
-              }}
-              placeholder="0"
-              className="input"
-            />
-          </div>
-        </div>
+        )}
 
-        <div>
-          <label htmlFor="total" className="label flex items-center justify-between">
-            <span>Total (₱)</span>
-            {totalIsOverridden && (
-              <button
-                type="button"
-                onClick={() => setTotalOverride(null)}
-                className="text-[11px] text-leaf-600 inline-flex items-center gap-1"
-              >
-                <RefreshCw className="w-3 h-3" /> Reset to {peso(computedTotal)}
-              </button>
-            )}
-          </label>
-          <input
-            id="total"
-            type="text"
-            inputMode="decimal"
-            value={totalOverride ?? String(computedTotal || "")}
-            onChange={(e) =>
-              setTotalOverride(e.target.value.replace(/[^\d.]/g, ""))
-            }
-            className="input"
-          />
-          <p className="text-[11px] text-ink-500 mt-1">
-            Auto-calculated from qty × unit price. Edit only if the receipt
-            shows a different total.
+        {/* Item editor */}
+        <div className="rounded-lg border border-sand-200 bg-sand-50/60 p-3 space-y-3">
+          <p className="text-sm font-medium text-ink-900">
+            {editId ? "Edit item" : "Add an item"}
           </p>
-        </div>
 
-        <div>
-          <p className="label">Category</p>
-          {showSuggestion && suggestion && (
+          <div>
+            <label htmlFor="item" className="label">Item</label>
+            <input
+              id="item"
+              type="text"
+              value={itemName}
+              onChange={(e) => setItemName(e.target.value)}
+              placeholder="e.g. Rice 5kg"
+              className="input"
+              autoComplete="off"
+            />
+          </div>
+
+          <div className="grid grid-cols-3 gap-2">
+            <div>
+              <label htmlFor="qty" className="label">Qty</label>
+              <input
+                id="qty"
+                type="text"
+                inputMode="decimal"
+                value={qty}
+                onChange={(e) => {
+                  setQty(e.target.value.replace(/[^\d.]/g, ""));
+                  setTotalOverride(null);
+                }}
+                className="input"
+              />
+            </div>
+            <div>
+              <label htmlFor="unitPrice" className="label">Unit ₱</label>
+              <input
+                id="unitPrice"
+                type="text"
+                inputMode="decimal"
+                value={unitPrice}
+                onChange={(e) => {
+                  setUnitPrice(e.target.value.replace(/[^\d.]/g, ""));
+                  setTotalOverride(null);
+                }}
+                placeholder="0"
+                className="input"
+              />
+            </div>
+            <div>
+              <label htmlFor="lineTotal" className="label">Total ₱</label>
+              <input
+                id="lineTotal"
+                type="text"
+                inputMode="decimal"
+                value={totalOverride ?? String(computedTotal || "")}
+                onChange={(e) => setTotalOverride(e.target.value.replace(/[^\d.]/g, ""))}
+                className="input"
+              />
+            </div>
+          </div>
+          {totalIsOverridden && (
             <button
               type="button"
-              onClick={() => handleCategoryChange(suggestion)}
-              className="w-full mb-2 px-3 py-2 rounded-lg bg-leaf-50 border border-leaf-100 flex items-center gap-2 hover:bg-leaf-100 transition-colors text-left"
+              onClick={() => setTotalOverride(null)}
+              className="text-[11px] text-leaf-600 inline-flex items-center gap-1"
             >
-              <Lightbulb className="w-4 h-4 text-leaf-600 flex-shrink-0" />
-              <p className="text-xs text-leaf-600 flex-1">
-                Looks like{" "}
-                <span className="font-medium">
-                  {staffCategoryLabel(suggestion)}
-                </span>
-                ?{" "}
-                <span className="text-leaf-600/70">Tap to apply</span>
-              </p>
+              <RefreshCw className="w-3 h-3" /> Reset total to {peso(computedTotal)}
             </button>
           )}
-          <div className="grid grid-cols-3 gap-2">
-            {categoryDefs.map((def) => {
-              const Icon = iconFor(def.id);
-              const active = category === def.id;
-              return (
-                <button
-                  key={def.id}
-                  type="button"
-                  onClick={() => handleCategoryChange(def.id)}
-                  aria-pressed={active}
-                  className={
-                    "p-2.5 rounded-lg border flex flex-col items-center text-center gap-1 transition-colors " +
-                    (active
-                      ? "border-leaf-500 bg-leaf-50"
-                      : "border-sand-200 bg-white hover:bg-sand-50")
-                  }
-                >
-                  <Icon
+
+          {/* Tag / category */}
+          <div>
+            <p className="label">Tag</p>
+            {showSuggestion && suggestion && (
+              <button
+                type="button"
+                onClick={() => handleCategoryChange(suggestion)}
+                className="w-full mb-2 px-3 py-2 rounded-lg bg-leaf-50 border border-leaf-100 flex items-center gap-2 hover:bg-leaf-100 transition-colors text-left"
+              >
+                <Lightbulb className="w-4 h-4 text-leaf-600 flex-shrink-0" />
+                <p className="text-xs text-leaf-600 flex-1">
+                  Looks like <span className="font-medium">{staffCategoryLabel(suggestion)}</span>?{" "}
+                  <span className="text-leaf-600/70">Tap to apply</span>
+                </p>
+              </button>
+            )}
+            <div className="grid grid-cols-3 gap-2">
+              {categoryDefs.map((def) => {
+                const Icon = iconFor(def.id);
+                const active = category === def.id;
+                return (
+                  <button
+                    key={def.id}
+                    type="button"
+                    onClick={() => handleCategoryChange(def.id)}
+                    aria-pressed={active}
                     className={
-                      "w-5 h-5 " +
-                      (active ? "text-leaf-600" : "text-ink-700")
+                      "p-2 rounded-lg border flex flex-col items-center text-center gap-1 transition-colors " +
+                      (active
+                        ? "border-leaf-500 bg-leaf-50"
+                        : "border-sand-200 bg-white hover:bg-sand-50")
                     }
-                  />
-                  <span className="text-[11px] leading-tight font-medium text-ink-900">
-                    {def.id}
-                  </span>
-                  {def.tagalog && (
-                    <span className="text-[10px] leading-tight text-ink-500">
-                      ({def.tagalog})
+                  >
+                    <Icon className={"w-5 h-5 " + (active ? "text-leaf-600" : "text-ink-700")} />
+                    <span className="text-[10px] leading-tight font-medium text-ink-900">
+                      {def.id}
                     </span>
-                  )}
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          {!category && (
-            <p className="text-[11px] text-ink-500 mt-1">
-              Pick a category before saving.
-            </p>
+
+          {category === "Maintenance" && (
+            <label className="flex items-start gap-2 p-2.5 rounded-lg bg-white border border-sand-200 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={majorRepair}
+                onChange={(e) => setMajorRepair(e.target.checked)}
+                className="mt-0.5"
+              />
+              <div className="flex-1">
+                <p className="text-sm text-ink-900">Mark as Major Repair</p>
+                <p className="text-[11px] text-ink-500 mt-0.5">
+                  {suggestMajor
+                    ? "Suggested: above the ₱5,000 threshold."
+                    : "Big-ticket repairs (aircon overhaul, structural, etc.)."}
+                </p>
+              </div>
+            </label>
           )}
+
+          <div className="flex gap-2">
+            {editId && (
+              <button type="button" onClick={clearEditor} className="btn btn-sm flex-1">
+                <X className="w-3.5 h-3.5" /> Cancel
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={commitItem}
+              className="btn-primary flex-1 h-9 text-sm"
+            >
+              {editId ? (
+                <>
+                  <Check className="w-4 h-4" /> Update item
+                </>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4" /> Add item
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
+        {/* Paid from */}
         <div>
           <p className="label">Paid from</p>
           <div className="grid grid-cols-2 gap-2">
@@ -449,9 +543,7 @@ export default function StaffNewEntryPage() {
               }
             >
               <p className="text-sm font-medium text-ink-900">PCF</p>
-              <p className="text-[11px] text-ink-500 mt-0.5">
-                Pooled petty cash
-              </p>
+              <p className="text-[11px] text-ink-500 mt-0.5">Pooled petty cash</p>
             </button>
             <button
               type="button"
@@ -464,96 +556,52 @@ export default function StaffNewEntryPage() {
               }
             >
               <p className="text-sm font-medium text-ink-900">Other fund</p>
-              <p className="text-[11px] text-ink-500 mt-0.5">
-                Bank transfer, etc.
-              </p>
+              <p className="text-[11px] text-ink-500 mt-0.5">Bank transfer, etc.</p>
             </button>
           </div>
-          {category === "Utilities" && paidFromAutoSuggested && paidFrom === "other" && (
-            <p className="text-[11px] text-ink-500 mt-1">
-              Auto-set to &ldquo;Other fund&rdquo; — utilities are usually paid
-              by bank transfer. Switch back to PCF if needed.
-            </p>
-          )}
-          {paidFrom === "other" && (
-            <p className="text-[11px] text-ink-500 mt-1">
-              Won&rsquo;t draw down the PCF balance. Recorded for reporting only.
-            </p>
-          )}
         </div>
 
-        {category === "Maintenance" && (
-          <label className="flex items-start gap-2 p-3 rounded-lg bg-sand-50 border border-sand-200 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={majorRepair}
-              onChange={(e) => setMajorRepair(e.target.checked)}
-              className="mt-0.5"
-            />
-            <div className="flex-1">
-              <p className="text-sm text-ink-900">Mark as Major Repair</p>
-              <p className="text-[11px] text-ink-500 mt-0.5">
-                {suggestMajor
-                  ? "Suggested: amount is above the ₱5,000 threshold."
-                  : "Use for big-ticket repairs (aircon overhaul, structural, etc.)."}
-              </p>
-            </div>
+        {/* Optional receipt total — verify line items add up */}
+        <div>
+          <label htmlFor="receiptTotal" className="label">
+            Receipt total (optional)
           </label>
-        )}
-
-        {previewFlags.length > 0 && (
-          <div className="rounded-lg bg-clay-50 border border-clay-200 p-3 space-y-2">
-            <p className="text-[11px] font-medium text-clay-500 uppercase tracking-wide">
-              Heads up
-            </p>
-            {previewFlags.map((flag) => (
-              <div key={flag.kind} className="flex gap-2 text-xs">
-                <AlertCircle className="w-3.5 h-3.5 text-clay-500 flex-shrink-0 mt-0.5" />
-                <p className="text-ink-700">{flag.message}</p>
-              </div>
-            ))}
-            <p className="text-[11px] text-ink-500">
-              You can still save — leave a note below to explain in advance.
-            </p>
-          </div>
-        )}
-
-        <div>
-          <label htmlFor="note" className="label">Note (optional)</label>
-          <textarea
-            id="note"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            rows={3}
-            placeholder={
-              previewFlags.length > 0
-                ? "e.g. Ate Lexi told me to stock up for the long weekend"
-                : "Add context if the price is unusual or someone asked you to buy something specific"
-            }
-            className="w-full px-3 py-2 rounded-lg border border-sand-200 bg-white text-base text-ink-900 placeholder:text-ink-300 focus:outline-none focus:ring-2 focus:ring-leaf-300 focus:border-leaf-300 resize-none"
-          />
-          <p className="text-[11px] text-ink-500 mt-1">
-            Saves a question later — shows on the entry&rsquo;s thread and on
-            Lexi&rsquo;s review card if the entry gets flagged.
-          </p>
-        </div>
-
-        <div>
-          <label htmlFor="date" className="label">Date</label>
           <input
-            id="date"
-            type="date"
-            value={date}
-            max={toIsoDate()}
-            onChange={(e) => setDate(e.target.value)}
+            id="receiptTotal"
+            type="text"
+            inputMode="decimal"
+            value={receiptTotal}
+            onChange={(e) => setReceiptTotal(e.target.value.replace(/[^\d.]/g, ""))}
+            placeholder="Type the total printed on the receipt"
             className="input"
           />
+          {totalMismatch ? (
+            <div className="mt-1.5 flex items-start gap-1.5 text-xs text-clay-500">
+              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+              <p>
+                Items add up to {peso(itemsTotal)}, but the receipt total is{" "}
+                {peso(receiptTotalNum ?? 0)}. Check for a missing item or a typo —
+                you can still save.
+              </p>
+            </div>
+          ) : (
+            <p className="text-[11px] text-ink-500 mt-1">
+              Leave blank to use the items total. Fill it in to double-check the
+              items add up.
+            </p>
+          )}
         </div>
 
         {error && <p className="text-sm text-clay-500">{error}</p>}
 
-        <button onClick={handleSubmit} className="btn-primary w-full">
-          <Check className="w-4 h-4" /> Save entry
+        <button onClick={handleSave} className="btn-primary w-full">
+          <Check className="w-4 h-4" />
+          Save purchase
+          {items.length > 0 && (
+            <span className="font-normal opacity-90">
+              · {items.length} item{items.length === 1 ? "" : "s"} · {peso(itemsTotal)}
+            </span>
+          )}
         </button>
       </div>
     </div>

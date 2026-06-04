@@ -24,7 +24,14 @@ import {
 } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
-import { addNoteToEntry, getEntryById, getUserById, setEntryPhotos } from "@/lib/store";
+import {
+  addNoteToEntry,
+  getEntriesByReceipt,
+  getEntryById,
+  getReceiptById,
+  getUserById,
+  setEntryPhotos,
+} from "@/lib/store";
 import { formatDate, formatDateTime, peso } from "@/lib/format";
 import { fileToCompressedDataUrl } from "@/lib/image";
 import { ImageLightbox } from "@/components/ImageLightbox";
@@ -142,6 +149,10 @@ export default function StaffEntryDetailPage() {
   const resolvedFlags = entry.flags.filter((f) => f.resolved);
   // Admins can edit any entry; staff can edit the ones they logged.
   const canEdit = me?.role === "admin" || me?.id === entry.loggedBy;
+  // When this entry is one line item of a multi-item receipt, the photo lives
+  // on the shared receipt (stored once) rather than on the entry itself.
+  const receipt = entry.receiptId ? getReceiptById(entry.receiptId) : undefined;
+  const receiptItemCount = entry.receiptId ? getEntriesByReceipt(entry.receiptId).length : 0;
 
   function handleSendReply() {
     if (!myId || !entry) return;
@@ -221,9 +232,42 @@ export default function StaffEntryDetailPage() {
         </div>
       </div>
 
-      {/* Receipts — manage multiple photos: add, delete, then Save. Lets
-          someone attach receipts after the fact, or keep several pages of a
-          single receipt together on one entry. */}
+      {/* Part of a multi-item receipt: the photo lives on the shared receipt
+          (stored once), shown read-only here. */}
+      {entry.receiptId && receipt && (
+        <div className="px-5 pt-4">
+          <p className="text-sm font-medium text-ink-900 mb-2 flex items-center gap-1.5">
+            <ImageIcon className="w-4 h-4 text-ink-500" /> Receipt
+            {receiptItemCount > 1 && (
+              <span className="text-ink-500 font-normal">· {receiptItemCount} items</span>
+            )}
+          </p>
+          {receipt.photoUrl ? (
+            <button
+              type="button"
+              onClick={() => setLightbox(receipt.photoUrl)}
+              className="block w-full rounded-lg border border-sand-200 bg-sand-50 overflow-hidden"
+              aria-label="View receipt full size"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={receipt.photoUrl}
+                alt={`Receipt for ${entry.vendor}`}
+                className="w-full max-h-96 object-contain"
+              />
+            </button>
+          ) : (
+            <p className="text-xs text-ink-500">No photo on this receipt.</p>
+          )}
+          <p className="text-[11px] text-ink-500 mt-1">
+            One of {receiptItemCount} item{receiptItemCount === 1 ? "" : "s"} logged on this receipt.
+          </p>
+        </div>
+      )}
+
+      {/* Standalone entry (no shared receipt): manage its own photos —
+          add, delete, then Save. */}
+      {!entry.receiptId && (
       <div className="px-5 pt-4">
         <p className="text-sm font-medium text-ink-900 mb-2 flex items-center gap-1.5">
           <ImageIcon className="w-4 h-4 text-ink-500" /> Receipts
@@ -328,6 +372,7 @@ export default function StaffEntryDetailPage() {
           }}
         />
       </div>
+      )}
 
       {/* Flags */}
       {openFlags.length > 0 && (
