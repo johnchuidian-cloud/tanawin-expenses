@@ -19,6 +19,7 @@ import {
 } from "@/lib/store";
 import { peso, relativeDate } from "@/lib/format";
 import ExportButton from "@/components/ExportButton";
+import ReceiptsPackButton from "@/components/ReceiptsPackButton";
 import PendingTopUpCard from "@/components/PendingTopUpCard";
 
 export default function AdminPcfPage() {
@@ -112,7 +113,10 @@ export default function AdminPcfPage() {
               </p>
             </div>
           </div>
-          <ExportButton variant="sm" />
+          <div className="flex flex-col items-end gap-1.5">
+            <ExportButton variant="sm" />
+            <ReceiptsPackButton variant="sm" />
+          </div>
         </div>
       </div>
 

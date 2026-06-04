@@ -921,9 +921,17 @@ export function rejectPcfTopUp(
  * reconciliation time when the admin has verified cash on hand and wants
  * the books to start fresh from a known state.
  *
+ * `date` is the day the reconciliation entry is booked on. The admin picks
+ * which month they're closing, so a reset run in early June to close out
+ * May lands the entry in May (dated to the last day of that month) instead
+ * of polluting June's totals. Defaults to today when omitted.
+ *
  * If the balance is already 0 (within rounding), this is a no-op.
  */
-export function clearPcfBalance(adminId: string, note?: string): void {
+export function clearPcfBalance(
+  adminId: string,
+  opts?: { date?: string; note?: string },
+): void {
   const currentBalance = getPcfBalance();
   if (Math.abs(currentBalance) < 0.005) return;
 
@@ -937,7 +945,7 @@ export function clearPcfBalance(adminId: string, note?: string): void {
   // happy with either.
   const amount = -currentBalance;
   const now = new Date().toISOString();
-  const datePart = now.slice(0, 10);
+  const datePart = opts?.date?.trim() || now.slice(0, 10);
   const full: PcfLedgerEntry = {
     id: `p_clear_${Math.random().toString(36).slice(2, 10)}`,
     kind: "top-up",
@@ -947,7 +955,7 @@ export function clearPcfBalance(adminId: string, note?: string): void {
     approvedBy: adminId,
     status: "approved",
     note:
-      note?.trim() ||
+      opts?.note?.trim() ||
       `Balance reset by admin — reconciled to ₱0 on ${datePart}`,
     createdAt: now,
   };

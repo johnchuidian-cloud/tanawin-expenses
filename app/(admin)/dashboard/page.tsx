@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { AlertCircle, ArrowDownRight, ArrowUpRight, Clock, Plus, RotateCcw, UserCog } from "lucide-react";
+import { AlertCircle, ArrowDownRight, ArrowUpRight, Clock, Plus, RotateCcw, UserCog, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { clearPcfBalance, getEntries, getPcfBalance, getPcfLedger, getUserById } from "@/lib/store";
-import { peso, pesoShort, relativeDate, toMonthKey, entryInMonth, monthLabel } from "@/lib/format";
+import { peso, pesoShort, relativeDate, formatDate, toIsoDate, toMonthKey, entryInMonth, monthLabel } from "@/lib/format";
 import ExportButton from "@/components/ExportButton";
+import ReceiptsPackButton from "@/components/ReceiptsPackButton";
 import { MonthGrid, type MonthScope } from "@/components/MonthGrid";
 
 export default function AdminDashboardPage() {
@@ -17,24 +18,47 @@ export default function AdminDashboardPage() {
   const ledger = getPcfLedger();
   const balance = getPcfBalance();
 
+  const today = new Date();
+  const thisMonth = toMonthKey(today);
+
+  // "Clear PCF balance" reconciliation. The admin picks which month they're
+  // closing so the offsetting entry lands in that month's books rather than
+  // always today's — clearing May's float in early June shouldn't dump a
+  // reconciliation line into June.
   const [clearedFlash, setClearedFlash] = useState(false);
-  function handleClearPcfBalance() {
+  const [clearOpen, setClearOpen] = useState(false);
+  const [clearMonth, setClearMonth] = useState(thisMonth);
+
+  // Months the admin can close: every month that has a PCF drawdown or a
+  // ledger entry, plus the current month, newest first.
+  const closableMonths = useMemo(() => {
+    const set = new Set<string>([thisMonth]);
+    for (const e of entries) if (e.paidFrom === "pcf") set.add(toMonthKey(e.date));
+    for (const p of ledger) set.add(toMonthKey(p.date));
+    return Array.from(set).sort((a, b) => (a < b ? 1 : -1));
+  }, [entries, ledger, thisMonth]);
+
+  // Book the reconciliation entry on the last day of the chosen month — or
+  // today, if the chosen month is the current one (you can't date it into
+  // the future).
+  function bookingDateFor(monthKey: string): string {
+    if (monthKey === thisMonth) return toIsoDate(today);
+    const [y, m] = monthKey.split("-").map(Number);
+    return toIsoDate(new Date(y, m, 0)); // day 0 of next month = last day of this one
+  }
+
+  function openClear() {
+    setClearMonth(thisMonth);
+    setClearOpen(true);
+  }
+
+  function confirmClear() {
     if (!me) return;
-    const formatted = peso(balance);
-    const ok = window.confirm(
-      `Clear the petty cash balance?\n\nCurrent balance is ${formatted}. ` +
-        `This books a reconciliation entry that resets the balance to ₱0 without ` +
-        `deleting any history. Going forward, top-ups and entries will start ` +
-        `tracking from zero.`,
-    );
-    if (!ok) return;
-    clearPcfBalance(me.id);
+    clearPcfBalance(me.id, { date: bookingDateFor(clearMonth) });
+    setClearOpen(false);
     setClearedFlash(true);
     setTimeout(() => setClearedFlash(false), 3000);
   }
-
-  const today = new Date();
-  const thisMonth = toMonthKey(today);
 
   // Scope drives every "this month" section on the page. Default to the
   // current month so the dashboard opens on the same view it always has;
@@ -177,11 +201,14 @@ export default function AdminDashboardPage() {
                 : "No top-ups recorded yet"}
             </p>
           </div>
-          <ExportButton variant="sm" />
+          <div className="flex flex-col items-end gap-1.5">
+            <ExportButton variant="sm" />
+            <ReceiptsPackButton variant="sm" />
+          </div>
         </div>
         <div className="mt-3 flex items-center gap-2">
           <button
-            onClick={handleClearPcfBalance}
+            onClick={openClear}
             className="inline-flex items-center gap-1.5 px-3 h-8 rounded-lg bg-white border border-leaf-200 text-leaf-600 text-xs font-medium hover:bg-leaf-100 transition-colors"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -435,6 +462,79 @@ export default function AdminDashboardPage() {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Clear-balance reconciliation modal — asks which month is being closed
+          so the offsetting entry is dated into that month, not always today. */}
+      {clearOpen && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-ink-900/40 px-4">
+          <div className="w-full max-w-sm bg-white rounded-2xl shadow-lg p-5 mb-4 sm:mb-0">
+            <div className="flex items-start justify-between gap-3 mb-3">
+              <div className="flex items-center gap-2">
+                <RotateCcw className="w-4 h-4 text-leaf-600" />
+                <p className="text-base font-medium text-ink-900">Clear PCF balance</p>
+              </div>
+              <button
+                onClick={() => setClearOpen(false)}
+                aria-label="Cancel"
+                className="w-7 h-7 -mt-1 -mr-1 rounded-lg flex items-center justify-center hover:bg-sand-100"
+              >
+                <X className="w-4 h-4 text-ink-500" />
+              </button>
+            </div>
+
+            <p className="text-sm text-ink-700">
+              Current balance is{" "}
+              <span className="font-medium text-ink-900">{peso(balance)}</span>. This
+              books a reconciliation entry that resets the balance to ₱0 without
+              deleting any history.
+            </p>
+
+            <div className="mt-4">
+              <label htmlFor="clearMonth" className="label">
+                Which month are you closing?
+              </label>
+              <select
+                id="clearMonth"
+                value={clearMonth}
+                onChange={(e) => setClearMonth(e.target.value)}
+                className="input"
+              >
+                {closableMonths.map((mk) => (
+                  <option key={mk} value={mk}>
+                    {monthLabel(mk)}
+                    {mk === thisMonth ? " (current)" : ""}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-ink-500 mt-1.5">
+                The reset entry will be dated{" "}
+                <span className="font-medium text-ink-700">
+                  {formatDate(bookingDateFor(clearMonth), { withYear: true })}
+                </span>
+                {clearMonth === thisMonth
+                  ? " (today)."
+                  : " (last day of that month)."}
+              </p>
+            </div>
+
+            <div className="flex gap-2 mt-5">
+              <button
+                onClick={() => setClearOpen(false)}
+                className="btn btn-sm flex-1"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmClear}
+                className="btn-primary flex-1 h-9 text-sm"
+              >
+                <RotateCcw className="w-4 h-4" />
+                Reset to ₱0
+              </button>
+            </div>
           </div>
         </div>
       )}
