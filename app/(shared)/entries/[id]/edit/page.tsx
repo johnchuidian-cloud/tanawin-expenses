@@ -3,13 +3,14 @@
 export const runtime = "edge";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, Check, RefreshCw, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
 import {
   appendEntryHistory,
+  ensureEntryMedia,
   getCategoryDefs,
   getEntries,
   getEntryById,
@@ -25,6 +26,12 @@ export default function EditEntryPage() {
   const params = useParams<{ id: string }>();
   const me = useCurrentUser();
   const entry = getEntryById(params.id);
+
+  // Pre-warm this entry's photos/history (not downloaded at app start) so
+  // the history append on save has the real blob to merge into.
+  useEffect(() => {
+    if (params.id) ensureEntryMedia(params.id);
+  }, [params.id]);
 
   // Loading (undefined) or logged out (null) — the shared layout redirects
   // logged-out users, so just hold here. After this guard `me` is a User.

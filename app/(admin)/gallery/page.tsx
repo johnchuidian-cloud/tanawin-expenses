@@ -1,15 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   Check,
   Clock,
   Image as ImageIcon,
+  Loader2,
 } from "lucide-react";
 import { useStoreTick } from "@/lib/useStoreTick";
-import { getEntries, getReceipts, getUserById } from "@/lib/store";
+import { getEntries, getReceipts, getUserById, loadAllMedia } from "@/lib/store";
 import { peso, relativeDate } from "@/lib/format";
 import { reconciliationStatus } from "@/lib/validation";
 
@@ -19,6 +20,21 @@ export default function AdminGalleryPage() {
   useStoreTick();
 
   const [filter, setFilter] = useState<Filter>("all");
+
+  // Photos aren't downloaded at app start (too heavy) — the gallery is the
+  // page that genuinely shows them all, so it bulk-loads them on open. The
+  // cards render immediately from the lightweight data; thumbnails fill in
+  // when the photos arrive.
+  const [photosReady, setPhotosReady] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    loadAllMedia("all").then((ok) => {
+      if (!cancelled && ok) setPhotosReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const receipts = getReceipts();
   const entries = getEntries();
@@ -73,6 +89,14 @@ export default function AdminGalleryPage() {
           Every captured receipt, with reconciliation status.
         </p>
       </div>
+
+      {/* Photo download progress — the images are the heavy part */}
+      {!photosReady && (
+        <div className="px-5 py-2 bg-sand-50 border-b border-sand-200 flex items-center gap-2 text-ink-500">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          <p className="text-[11px]">Loading photos — thumbnails will appear shortly…</p>
+        </div>
+      )}
 
       {/* Filter chips */}
       <div className="px-5 pt-3 flex gap-2 overflow-x-auto">

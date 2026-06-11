@@ -18,3 +18,4 @@ trigger
 2026-06-04c — PCF drawdowns show-more; re-dated balance-reset top-up to May
 2026-06-04d — multi-item purchase flow (one receipt, many tagged items)
 2026-06-04e — receipts-pack ZIP download; PCF clear-balance asks which month
+2026-06-11a — fast login: photos load on demand, not at startup; retry on failed load

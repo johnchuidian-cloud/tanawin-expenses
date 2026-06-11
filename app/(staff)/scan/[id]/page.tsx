@@ -3,21 +3,24 @@
 export const runtime = "edge";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   AlertCircle,
   ArrowLeft,
   Check,
   Image as ImageIcon,
+  Loader2,
   Plus,
 } from "lucide-react";
 import { useStoreTick } from "@/lib/useStoreTick";
 import {
+  ensureReceiptPhoto,
   getEntries,
   getEntriesByReceipt,
   getReceiptById,
   getUserById,
+  isReceiptPhotoLoaded,
 } from "@/lib/store";
 import { peso, relativeDate } from "@/lib/format";
 import { staffCategoryLabel } from "@/lib/category-meta";
@@ -30,6 +33,11 @@ export default function StaffReceiptDetailPage() {
 
   const receipt = getReceiptById(params.id);
   const [photoErrored, setPhotoErrored] = useState(false);
+  // Photo isn't downloaded at app start — fetch it for this receipt on open.
+  const photoReady = isReceiptPhotoLoaded(params.id);
+  useEffect(() => {
+    if (params.id) ensureReceiptPhoto(params.id);
+  }, [params.id]);
   // useStoreTick already covers re-renders; getEntriesByReceipt is just for memo deps.
   const allEntries = getEntries();
   const linkedEntries = useMemo(
@@ -79,7 +87,12 @@ export default function StaffReceiptDetailPage() {
       {/* Receipt card */}
       <div className="px-5 pt-4">
         <div className="rounded-lg bg-white border border-sand-200 overflow-hidden">
-          {receipt.photoUrl && !photoErrored ? (
+          {!photoReady ? (
+            <div className="bg-sand-50 h-24 flex items-center justify-center gap-2 text-ink-500">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <p className="text-xs">Loading photo…</p>
+            </div>
+          ) : receipt.photoUrl && !photoErrored ? (
             <div className="bg-sand-50 aspect-[4/3] flex items-center justify-center overflow-hidden">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img

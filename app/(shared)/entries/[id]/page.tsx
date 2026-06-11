@@ -13,6 +13,7 @@ import {
   ImageIcon,
   ImagePlus,
   Landmark,
+  Loader2,
   MessageSquare,
   Pencil,
   Save,
@@ -26,10 +27,14 @@ import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
 import {
   addNoteToEntry,
+  ensureEntryMedia,
+  ensureReceiptPhoto,
   getEntriesByReceipt,
   getEntryById,
   getReceiptById,
   getUserById,
+  isEntryMediaLoaded,
+  isReceiptPhotoLoaded,
   setEntryPhotos,
 } from "@/lib/store";
 import { formatDate, formatDateTime, peso } from "@/lib/format";
@@ -78,6 +83,18 @@ export default function StaffEntryDetailPage() {
     () => entry?.photoUrls ?? (entry?.photoUrl ? [entry.photoUrl] : []),
     [entry?.photoUrls, entry?.photoUrl],
   );
+
+  // Photos + edit history aren't downloaded at app start (they're heavy);
+  // fetch this entry's media — and its shared receipt's photo — on open.
+  const mediaLoaded = entry ? isEntryMediaLoaded(entry.id) : false;
+  const receiptPhotoReady = entry?.receiptId
+    ? isReceiptPhotoLoaded(entry.receiptId)
+    : true;
+  useEffect(() => {
+    if (!entry) return;
+    ensureEntryMedia(entry.id);
+    if (entry.receiptId) ensureReceiptPhoto(entry.receiptId);
+  }, [entry?.id, entry?.receiptId, entry]);
 
   // Sync the working copy from the entry whenever it loads or changes from
   // elsewhere — unless there are unsaved local edits we'd stomp on.
@@ -242,7 +259,12 @@ export default function StaffEntryDetailPage() {
               <span className="text-ink-500 font-normal">· {receiptItemCount} items</span>
             )}
           </p>
-          {receipt.photoUrl ? (
+          {!receiptPhotoReady ? (
+            <div className="rounded-lg border border-sand-200 bg-sand-50 h-32 flex items-center justify-center gap-2 text-ink-500">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <p className="text-xs">Loading photo…</p>
+            </div>
+          ) : receipt.photoUrl ? (
             <button
               type="button"
               onClick={() => setLightbox(receipt.photoUrl)}
@@ -266,8 +288,21 @@ export default function StaffEntryDetailPage() {
       )}
 
       {/* Standalone entry (no shared receipt): manage its own photos —
-          add, delete, then Save. */}
-      {!entry.receiptId && (
+          add, delete, then Save. The manager stays hidden until this entry's
+          media has loaded: editing against a not-yet-loaded photo list could
+          save over photos the user never saw. */}
+      {!entry.receiptId && !mediaLoaded && (
+        <div className="px-5 pt-4">
+          <p className="text-sm font-medium text-ink-900 mb-2 flex items-center gap-1.5">
+            <ImageIcon className="w-4 h-4 text-ink-500" /> Receipts
+          </p>
+          <div className="rounded-lg border border-sand-200 bg-sand-50 h-24 flex items-center justify-center gap-2 text-ink-500">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <p className="text-xs">Loading photos…</p>
+          </div>
+        </div>
+      )}
+      {!entry.receiptId && mediaLoaded && (
       <div className="px-5 pt-4">
         <p className="text-sm font-medium text-ink-900 mb-2 flex items-center gap-1.5">
           <ImageIcon className="w-4 h-4 text-ink-500" /> Receipts

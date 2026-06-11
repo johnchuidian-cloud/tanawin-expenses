@@ -15,7 +15,7 @@
 "use client";
 
 import JSZip from "jszip";
-import { getEntries, getReceipts, getUserById } from "./store";
+import { getEntries, getReceipts, getUserById, loadAllMedia } from "./store";
 import { reconciliationStatus } from "./validation";
 import { toMonthKey, monthLabel } from "./format";
 import type { Entry, Receipt } from "./types";
@@ -91,6 +91,14 @@ function standalonePhotoEntries(scope: PackScope): Entry[] {
  * null if there's nothing to pack (caller shows an empty-state message).
  */
 export async function buildReceiptsPack(scope: PackScope): Promise<PackResult | null> {
+  // Photos aren't downloaded at app start — pull them for this scope first.
+  // This must happen before standalonePhotoEntries(), which detects loose
+  // photos by looking at the (lazily loaded) entry media.
+  const mediaOk = await loadAllMedia(scope);
+  if (!mediaOk) {
+    throw new Error("Couldn't download the receipt photos. Check your connection and try again.");
+  }
+
   const receipts = receiptsInScope(scope);
   const loose = standalonePhotoEntries(scope);
   if (receipts.length === 0 && loose.length === 0) return null;

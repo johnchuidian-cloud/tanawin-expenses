@@ -26,6 +26,22 @@ let users: User[] = [];
 
 let _bootstrapped = false;
 let _bootstrapping = false;
+let _bootstrapFailed = false;
+let _retryTimer: ReturnType<typeof setTimeout> | null = null;
+let _retryDelay = 3000;
+
+/**
+ * Photos are deliberately NOT downloaded at bootstrap. Receipt photos are
+ * stored as base64 data URLs inside `receipts.photo_url` and the packed
+ * `entries.photo_url` media blob, which adds up to tens of MB — downloading
+ * them all before the login screen can show four names made the app look
+ * broken on slow connections. So bootstrap/refresh select every column
+ * EXCEPT photo_url, and photos load on demand (ensureEntryMedia /
+ * ensureReceiptPhoto / loadAllMedia) on the pages that actually show them.
+ */
+const RECEIPT_COLS = "id,vendor,date,ocr_text,total_typed,captured_by,status";
+const ENTRY_COLS =
+  "id,date,vendor,item,qty,unit_price,total,category,paid_from,major_repair,receipt_id,logged_by,created_at,flags,notes";
 
 /**
  * True once bootstrapFromSupabase has populated the in-memory state.
@@ -37,43 +53,101 @@ export function isBootstrapComplete(): boolean {
   return _bootstrapped;
 }
 
+export type BootstrapStatus = "loading" | "ready" | "error";
+
+/** What the login screen shows: spinner (loading), users (ready), retry (error). */
+export function getBootstrapStatus(): BootstrapStatus {
+  if (_bootstrapped) return "ready";
+  return _bootstrapFailed ? "error" : "loading";
+}
+
+/** Manual retry from the UI — clears any scheduled auto-retry and goes now. */
+export function retryBootstrap(): void {
+  if (_bootstrapped || _bootstrapping) return;
+  if (_retryTimer) {
+    clearTimeout(_retryTimer);
+    _retryTimer = null;
+  }
+  _bootstrapFailed = false;
+  notify();
+  bootstrapFromSupabase();
+}
+
+/**
+ * After a failed bootstrap, mark the error (so the login screen can say so)
+ * and schedule an automatic retry with backoff. Previously a failure was
+ * only logged to the console and never retried — on flaky Wi-Fi the user
+ * list just stayed empty until a full page reload.
+ */
+function scheduleBootstrapRetry(): void {
+  _bootstrapFailed = true;
+  notify();
+  if (typeof window === "undefined" || _retryTimer) return;
+  const delay = _retryDelay;
+  _retryDelay = Math.min(_retryDelay * 2, 30_000);
+  _retryTimer = setTimeout(() => {
+    _retryTimer = null;
+    _bootstrapFailed = false;
+    notify();
+    bootstrapFromSupabase();
+  }, delay);
+}
+
+// Retry immediately when the device comes back online.
+if (typeof window !== "undefined") {
+  window.addEventListener("online", () => {
+    if (!_bootstrapped) retryBootstrap();
+  });
+}
+
 export async function bootstrapFromSupabase(): Promise<void> {
   if (_bootstrapped || _bootstrapping) return;
   _bootstrapping = true;
 
-  const [usersRes, receiptsRes, entriesRes, pcfRes, catRes] = await Promise.all([
-    supabase.from("users").select("*"),
-    supabase.from("receipts").select("*"),
-    supabase.from("entries").select("*").order("created_at", { ascending: false }),
-    supabase.from("pcf_ledger").select("*").order("created_at", { ascending: false }),
-    supabase.from("category_defs").select("*").eq("builtin", false),
-  ]);
+  try {
+    const [usersRes, receiptsRes, entriesRes, pcfRes, catRes] = await Promise.all([
+      supabase.from("users").select("*"),
+      supabase.from("receipts").select(RECEIPT_COLS),
+      supabase.from("entries").select(ENTRY_COLS).order("created_at", { ascending: false }),
+      supabase.from("pcf_ledger").select("*").order("created_at", { ascending: false }),
+      supabase.from("category_defs").select("*").eq("builtin", false),
+    ]);
 
-  if (usersRes.error || receiptsRes.error || entriesRes.error || pcfRes.error || catRes.error) {
-    console.error("supabase: bootstrap failed", { usersRes, receiptsRes, entriesRes, pcfRes, catRes });
+    if (usersRes.error || receiptsRes.error || entriesRes.error || pcfRes.error || catRes.error) {
+      console.error("supabase: bootstrap failed", { usersRes, receiptsRes, entriesRes, pcfRes, catRes });
+      scheduleBootstrapRetry();
+      return;
+    }
+
+    users = usersRes.data!.map(mapUser);
+    receipts = receiptsRes.data!.map(mapReceipt);
+    entries = entriesRes.data!.map(mapEntry);
+    pcfLedger = pcfRes.data!.map(mapPcfLedger);
+
+    if (catRes.data!.length > 0) {
+      const customDefs = catRes.data!.map(mapCategoryDef);
+      categoryDefs = [...BUILTIN_DEFS, ...customDefs].map((def) => {
+        const overrides = _hintOverrides[def.id];
+        return overrides?.length ? { ...def, extraHints: overrides } : def;
+      });
+    }
+
+    _bootstrapped = true;
+    _bootstrapFailed = false;
+    _retryDelay = 3000;
+    notify();
+    // Let useCurrentUser re-check session against the now-populated users array
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new Event("tanawin:auth"));
+    }
+  } catch (err) {
+    // A network-level failure (offline, DNS, timeout) makes fetch reject —
+    // previously this escaped the function and left _bootstrapping stuck
+    // true, so nothing could ever retry. Catch it and schedule a retry.
+    console.error("supabase: bootstrap threw", err);
+    scheduleBootstrapRetry();
+  } finally {
     _bootstrapping = false;
-    return;
-  }
-
-  users = usersRes.data!.map(mapUser);
-  receipts = receiptsRes.data!.map(mapReceipt);
-  entries = entriesRes.data!.map(mapEntry);
-  pcfLedger = pcfRes.data!.map(mapPcfLedger);
-
-  if (catRes.data!.length > 0) {
-    const customDefs = catRes.data!.map(mapCategoryDef);
-    categoryDefs = [...BUILTIN_DEFS, ...customDefs].map((def) => {
-      const overrides = _hintOverrides[def.id];
-      return overrides?.length ? { ...def, extraHints: overrides } : def;
-    });
-  }
-
-  _bootstrapped = true;
-  _bootstrapping = false;
-  notify();
-  // Let useCurrentUser re-check session against the now-populated users array
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new Event("tanawin:auth"));
   }
 }
 
@@ -93,8 +167,8 @@ export async function refreshFromSupabase(): Promise<void> {
   try {
     const [usersRes, receiptsRes, entriesRes, pcfRes, catRes] = await Promise.all([
       supabase.from("users").select("*"),
-      supabase.from("receipts").select("*"),
-      supabase.from("entries").select("*").order("created_at", { ascending: false }),
+      supabase.from("receipts").select(RECEIPT_COLS),
+      supabase.from("entries").select(ENTRY_COLS).order("created_at", { ascending: false }),
       supabase.from("pcf_ledger").select("*").order("created_at", { ascending: false }),
       supabase.from("category_defs").select("*").eq("builtin", false),
     ]);
@@ -117,6 +191,9 @@ export async function refreshFromSupabase(): Promise<void> {
       return overrides?.length ? { ...def, extraHints: overrides } : def;
     });
     notify();
+  } catch (err) {
+    // Offline refresh shouldn't crash — keep showing the data we have.
+    console.error("supabase: refresh threw", err);
   } finally {
     _refreshing = false;
   }
@@ -133,12 +210,36 @@ function mapUser(row: Record<string, unknown>): User {
   };
 }
 
+// ---------- MEDIA CACHE (photos load on demand, not at bootstrap) ----------
+// Key present = this row's photo data has been fetched this session. The
+// caches survive refreshFromSupabase (which re-maps rows without photo_url),
+// so photos don't vanish when the tab refocuses.
+
+const _entryMediaCache = new Map<string, { photoUrls: string[]; history: AuditRecord[] }>();
+const _receiptPhotoCache = new Map<string, string>(); // "" = loaded, no photo
+
+/** Has this entry's photos + edit history been fetched yet? */
+export function isEntryMediaLoaded(id: string): boolean {
+  return _entryMediaCache.has(id);
+}
+
+/** Has this receipt's photo been fetched yet? */
+export function isReceiptPhotoLoaded(id: string): boolean {
+  return _receiptPhotoCache.has(id);
+}
+
 function mapReceipt(row: Record<string, unknown>): Receipt {
+  const id = row.id as string;
+  // Bootstrap/refresh rows omit photo_url; full rows (lazy fetch, inserts)
+  // carry it and refresh the cache.
+  if ("photo_url" in row) {
+    _receiptPhotoCache.set(id, (row.photo_url ?? "") as string);
+  }
   return {
-    id: row.id as string,
+    id,
     vendor: row.vendor as string,
     date: row.date as string,
-    photoUrl: (row.photo_url ?? "") as string,
+    photoUrl: _receiptPhotoCache.get(id) ?? "",
     ocrText: row.ocr_text as string | undefined,
     totalTyped: row.total_typed as number,
     capturedBy: row.captured_by as string,
@@ -196,9 +297,13 @@ function serializeEntryMedia(photoUrls: string[], history: AuditRecord[]): strin
 }
 
 function mapEntry(row: Record<string, unknown>): Entry {
-  const media = parseEntryMedia(row.photo_url);
+  const id = row.id as string;
+  if ("photo_url" in row) {
+    _entryMediaCache.set(id, parseEntryMedia(row.photo_url));
+  }
+  const media = _entryMediaCache.get(id) ?? { photoUrls: [], history: [] };
   return {
-    id: row.id as string,
+    id,
     date: row.date as string,
     vendor: row.vendor as string,
     item: row.item as string,
@@ -246,6 +351,130 @@ function mapCategoryDef(row: Record<string, unknown>): CategoryDef {
     builtin: row.builtin as boolean,
     extraHints: (row.extra_hints ?? []) as string[],
   };
+}
+
+// ---------- LAZY MEDIA LOADERS ----------
+
+/** Re-apply cached media onto the in-memory entry/receipt and notify. */
+function applyEntryMedia(id: string): void {
+  const media = _entryMediaCache.get(id);
+  if (!media) return;
+  entries = entries.map((e) =>
+    e.id === id
+      ? { ...e, photoUrls: media.photoUrls, photoUrl: media.photoUrls[0], history: media.history }
+      : e,
+  );
+  notify();
+}
+
+function applyReceiptPhoto(id: string): void {
+  const photoUrl = _receiptPhotoCache.get(id);
+  if (photoUrl === undefined) return;
+  receipts = receipts.map((r) => (r.id === id ? { ...r, photoUrl } : r));
+  notify();
+}
+
+const _entryMediaPending = new Map<string, Promise<void>>();
+const _receiptPhotoPending = new Map<string, Promise<void>>();
+
+/**
+ * Fetch one entry's photos + edit history (the packed photo_url blob) if we
+ * haven't already this session. Resolves immediately when cached; concurrent
+ * calls for the same id share one request. On failure it resolves without
+ * caching, so a later call retries.
+ */
+export function ensureEntryMedia(id: string): Promise<void> {
+  if (_entryMediaCache.has(id)) return Promise.resolve();
+  const pending = _entryMediaPending.get(id);
+  if (pending) return pending;
+  const p = (async () => {
+    const { data, error } = await supabase
+      .from("entries")
+      .select("photo_url")
+      .eq("id", id)
+      .maybeSingle();
+    if (error) {
+      console.error("supabase: ensureEntryMedia", error);
+      return;
+    }
+    _entryMediaCache.set(id, parseEntryMedia(data?.photo_url));
+    applyEntryMedia(id);
+  })()
+    .catch((err) => console.error("supabase: ensureEntryMedia threw", err))
+    .finally(() => _entryMediaPending.delete(id));
+  _entryMediaPending.set(id, p);
+  return p;
+}
+
+/** Fetch one receipt's photo if we haven't already this session. */
+export function ensureReceiptPhoto(id: string): Promise<void> {
+  if (_receiptPhotoCache.has(id)) return Promise.resolve();
+  const pending = _receiptPhotoPending.get(id);
+  if (pending) return pending;
+  const p = (async () => {
+    const { data, error } = await supabase
+      .from("receipts")
+      .select("photo_url")
+      .eq("id", id)
+      .maybeSingle();
+    if (error) {
+      console.error("supabase: ensureReceiptPhoto", error);
+      return;
+    }
+    _receiptPhotoCache.set(id, (data?.photo_url ?? "") as string);
+    applyReceiptPhoto(id);
+  })()
+    .catch((err) => console.error("supabase: ensureReceiptPhoto threw", err))
+    .finally(() => _receiptPhotoPending.delete(id));
+  _receiptPhotoPending.set(id, p);
+  return p;
+}
+
+/**
+ * Bulk-fetch photos for every receipt and entry in a scope — a YYYY-MM month
+ * or "all". Used by the pages that genuinely need many photos at once (the
+ * gallery, the receipts pack). Returns false if either fetch failed.
+ */
+export async function loadAllMedia(scope: "all" | string): Promise<boolean> {
+  try {
+    let rq = supabase.from("receipts").select("id,photo_url");
+    let eq = supabase.from("entries").select("id,photo_url");
+    if (scope !== "all") {
+      const [y, m] = scope.split("-").map(Number);
+      const start = `${scope}-01`;
+      const lastDay = new Date(y, m, 0).getDate();
+      const end = `${scope}-${String(lastDay).padStart(2, "0")}`;
+      rq = rq.gte("date", start).lte("date", end);
+      eq = eq.gte("date", start).lte("date", end);
+    }
+    const [rRes, eRes] = await Promise.all([rq, eq]);
+    if (rRes.error || eRes.error) {
+      console.error("supabase: loadAllMedia", { rRes, eRes });
+      return false;
+    }
+    for (const row of rRes.data!) {
+      _receiptPhotoCache.set(row.id as string, (row.photo_url ?? "") as string);
+    }
+    for (const row of eRes.data!) {
+      _entryMediaCache.set(row.id as string, parseEntryMedia(row.photo_url));
+    }
+    // Re-apply everything in one pass + one notify.
+    receipts = receipts.map((r) => {
+      const photoUrl = _receiptPhotoCache.get(r.id);
+      return photoUrl === undefined ? r : { ...r, photoUrl };
+    });
+    entries = entries.map((e) => {
+      const media = _entryMediaCache.get(e.id);
+      return media
+        ? { ...e, photoUrls: media.photoUrls, photoUrl: media.photoUrls[0], history: media.history }
+        : e;
+    });
+    notify();
+    return true;
+  } catch (err) {
+    console.error("supabase: loadAllMedia threw", err);
+    return false;
+  }
 }
 
 // ---------- CATEGORIES ----------
@@ -523,6 +752,8 @@ export function addEntry(entry: Omit<Entry, "id" | "createdAt">): Entry {
     id: `e_${Math.random().toString(36).slice(2, 10)}`,
     createdAt: new Date().toISOString(),
   };
+  // We know this entry's media — seed the cache so nothing refetches it.
+  _entryMediaCache.set(full.id, { photoUrls: photos, history });
   entries = [full, ...entries];
   notify();
 
@@ -587,39 +818,56 @@ export function setEntryPhotos(
   photoUrls: string[],
   record?: AuditRecord,
 ): void {
-  const cur = entries.find((e) => e.id === id);
-  if (!cur) return;
-  const history = record ? [...(cur.history ?? []), record] : cur.history ?? [];
-  entries = entries.map((e) =>
-    e.id === id ? { ...e, photoUrls, photoUrl: photoUrls[0], history } : e,
-  );
-  notify();
+  // Photos + history share one packed DB column, so we must have the current
+  // blob before writing — otherwise a save made before the lazy media fetch
+  // finished would silently erase the entry's edit history (or photos).
+  (async () => {
+    await ensureEntryMedia(id);
+    if (!_entryMediaCache.has(id)) {
+      console.error("setEntryPhotos: media not loaded (offline?) — write skipped to avoid data loss");
+      return;
+    }
+    const cur = entries.find((e) => e.id === id);
+    if (!cur) return;
+    const history = record ? [...(cur.history ?? []), record] : cur.history ?? [];
+    _entryMediaCache.set(id, { photoUrls, history });
+    entries = entries.map((e) =>
+      e.id === id ? { ...e, photoUrls, photoUrl: photoUrls[0], history } : e,
+    );
+    notify();
 
-  supabase
-    .from("entries")
-    .update({ photo_url: serializeEntryMedia(photoUrls, history) })
-    .eq("id", id)
-    .then(({ error }) => {
-      if (error) console.error("supabase: setEntryPhotos", error);
-    });
+    const { error } = await supabase
+      .from("entries")
+      .update({ photo_url: serializeEntryMedia(photoUrls, history) })
+      .eq("id", id);
+    if (error) console.error("supabase: setEntryPhotos", error);
+  })();
 }
 
 /** Append one audit record to an entry's edit history. */
 export function appendEntryHistory(id: string, record: AuditRecord): void {
-  const cur = entries.find((e) => e.id === id);
-  if (!cur) return;
-  const history = [...(cur.history ?? []), record];
-  const photoUrls = cur.photoUrls ?? (cur.photoUrl ? [cur.photoUrl] : []);
-  entries = entries.map((e) => (e.id === id ? { ...e, history } : e));
-  notify();
+  // Same blob-sharing caveat as setEntryPhotos: never write photo_url
+  // without the current photos in hand.
+  (async () => {
+    await ensureEntryMedia(id);
+    if (!_entryMediaCache.has(id)) {
+      console.error("appendEntryHistory: media not loaded (offline?) — write skipped to avoid data loss");
+      return;
+    }
+    const cur = entries.find((e) => e.id === id);
+    if (!cur) return;
+    const history = [...(cur.history ?? []), record];
+    const photoUrls = cur.photoUrls ?? (cur.photoUrl ? [cur.photoUrl] : []);
+    _entryMediaCache.set(id, { photoUrls, history });
+    entries = entries.map((e) => (e.id === id ? { ...e, history } : e));
+    notify();
 
-  supabase
-    .from("entries")
-    .update({ photo_url: serializeEntryMedia(photoUrls, history) })
-    .eq("id", id)
-    .then(({ error }) => {
-      if (error) console.error("supabase: appendEntryHistory", error);
-    });
+    const { error } = await supabase
+      .from("entries")
+      .update({ photo_url: serializeEntryMedia(photoUrls, history) })
+      .eq("id", id);
+    if (error) console.error("supabase: appendEntryHistory", error);
+  })();
 }
 
 export function addNoteToEntry(
@@ -680,6 +928,7 @@ export function addReceipt(r: Omit<Receipt, "id">): Receipt {
     ...r,
     id: `r_${Math.random().toString(36).slice(2, 10)}`,
   };
+  _receiptPhotoCache.set(full.id, full.photoUrl ?? "");
   receipts = [full, ...receipts];
   notify();
 
@@ -771,7 +1020,12 @@ export function addPurchase(input: {
     history: [],
   }));
 
-  // Update in-memory state immediately so the UI is instant.
+  // Update in-memory state immediately so the UI is instant. Seed the media
+  // caches too — we know the photo and the (empty) entry media at creation.
+  _receiptPhotoCache.set(receipt.id, receipt.photoUrl ?? "");
+  for (const e of created) {
+    _entryMediaCache.set(e.id, { photoUrls: [], history: [] });
+  }
   receipts = [receipt, ...receipts];
   entries = [...created, ...entries];
   notify();

@@ -53,8 +53,12 @@ export default function ReceiptsPackButton({
           `Saved ${res.filename} · ${res.count} receipt${res.count === 1 ? "" : "s"}, ${res.photoCount} photo${res.photoCount === 1 ? "" : "s"}.`,
         );
       }
-    } catch {
-      setResult("Couldn't build the pack. Try a smaller month.");
+    } catch (err) {
+      setResult(
+        err instanceof Error && err.message
+          ? err.message
+          : "Couldn't build the pack. Try a smaller month.",
+      );
     } finally {
       setBusy(false);
     }

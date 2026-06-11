@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { User as UserIcon, ShieldCheck } from "lucide-react";
-import { getUsers } from "@/lib/store";
+import { User as UserIcon, ShieldCheck, Loader2, RefreshCw, WifiOff } from "lucide-react";
+import { getBootstrapStatus, getUsers, retryBootstrap } from "@/lib/store";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { login } from "@/lib/auth";
 
@@ -11,6 +11,7 @@ export default function LoginPage() {
   useStoreTick();
   const router = useRouter();
   const users = getUsers();
+  const bootStatus = getBootstrapStatus();
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +57,41 @@ export default function LoginPage() {
         {!selectedName ? (
           <div className="space-y-2">
             <p className="text-xs text-ink-500 mb-3">Who&rsquo;s using the app?</p>
+
+            {/* The user list arrives with the initial data load. Until it
+                does, show progress; if the load failed, say so and offer a
+                retry — never an unexplained blank screen. */}
+            {users.length === 0 && bootStatus !== "error" && (
+              <div className="card flex items-center gap-3 p-4">
+                <Loader2 className="w-5 h-5 text-leaf-500 animate-spin flex-shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-ink-900">Loading…</p>
+                  <p className="text-xs text-ink-500 mt-0.5">
+                    Fetching the user list. On slow connections this can take a moment.
+                  </p>
+                </div>
+              </div>
+            )}
+            {users.length === 0 && bootStatus === "error" && (
+              <div className="card p-4">
+                <div className="flex items-center gap-3">
+                  <WifiOff className="w-5 h-5 text-clay-500 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-ink-900">Couldn&rsquo;t connect</p>
+                    <p className="text-xs text-ink-500 mt-0.5">
+                      Check your internet connection. We&rsquo;ll keep retrying automatically.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => retryBootstrap()}
+                  className="btn btn-sm w-full mt-3"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Try again now
+                </button>
+              </div>
+            )}
+
             {users.map((u) => (
               <button
                 key={u.id}
