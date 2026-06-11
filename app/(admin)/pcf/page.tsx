@@ -18,6 +18,7 @@ import {
   getUserById,
 } from "@/lib/store";
 import { peso, relativeDate } from "@/lib/format";
+import { paidFromRowClasses } from "@/lib/payment-meta";
 import ExportButton from "@/components/ExportButton";
 import ReceiptsPackButton from "@/components/ReceiptsPackButton";
 import PendingTopUpCard from "@/components/PendingTopUpCard";
@@ -229,9 +230,13 @@ export default function AdminPcfPage() {
           {recentDrawdowns.map((entry) => {
             const logger = getUserById(entry.loggedBy);
             return (
-              <div
+              <Link
                 key={entry.id}
-                className="flex items-start justify-between gap-3 p-2.5 rounded-lg bg-white border border-sand-200"
+                href={`/entries/${entry.id}`}
+                className={
+                  "flex items-start justify-between gap-3 p-2.5 rounded-lg border transition-colors " +
+                  paidFromRowClasses(entry.paidFrom)
+                }
               >
                 <div className="flex items-start gap-2 min-w-0">
                   <ArrowDown className="w-4 h-4 text-clay-500 flex-shrink-0 mt-0.5" />
@@ -248,7 +253,7 @@ export default function AdminPcfPage() {
                 <p className="text-sm font-medium text-ink-900 flex-shrink-0">
                   {peso(entry.total)}
                 </p>
-              </div>
+              </Link>
             );
           })}
         </div>

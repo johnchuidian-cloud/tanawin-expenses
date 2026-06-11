@@ -9,6 +9,7 @@ import { clearPcfBalance, getEntries, getPcfBalance, getPcfLedger, getUserById }
 import { peso, pesoShort, relativeDate, formatDate, toIsoDate, toMonthKey, entryInMonth, monthLabel } from "@/lib/format";
 import ExportButton from "@/components/ExportButton";
 import ReceiptsPackButton from "@/components/ReceiptsPackButton";
+import { paidFromBadgeClasses, paidFromLabel, paidFromRowClasses } from "@/lib/payment-meta";
 import { MonthGrid, type MonthScope } from "@/components/MonthGrid";
 
 export default function AdminDashboardPage() {
@@ -392,7 +393,10 @@ export default function AdminDashboardPage() {
                 <Link
                   key={entry.id}
                   href={`/entries/${entry.id}`}
-                  className="flex items-center justify-between p-2.5 rounded-lg bg-white border border-sand-200 hover:bg-sand-50 transition-colors"
+                  className={
+                    "flex items-center justify-between p-2.5 rounded-lg border transition-colors " +
+                    paidFromRowClasses(entry.paidFrom)
+                  }
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-ink-900 truncate">
@@ -400,6 +404,9 @@ export default function AdminDashboardPage() {
                       {entry.vendor} · {entry.item}
                     </p>
                     <p className="text-[11px] text-ink-500 mt-0.5">
+                      <span className={"badge mr-1 " + paidFromBadgeClasses(entry.paidFrom)}>
+                        {paidFromLabel(entry.paidFrom)}
+                      </span>
                       {relativeDate(entry.date)} · {entry.category} · {logger?.name ?? "—"}
                     </p>
                   </div>

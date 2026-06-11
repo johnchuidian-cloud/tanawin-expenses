@@ -38,6 +38,7 @@ import {
   setEntryPhotos,
 } from "@/lib/store";
 import { formatDate, formatDateTime, peso } from "@/lib/format";
+import { paidFromBadgeClasses } from "@/lib/payment-meta";
 import { fileToCompressedDataUrl } from "@/lib/image";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { staffCategoryLabel } from "@/lib/category-meta";
@@ -237,11 +238,17 @@ export default function StaffEntryDetailPage() {
               Logged by {logger?.name ?? "—"} · {formatDateTime(entry.createdAt)}
             </p>
             {entry.paidFrom === "other" ? (
-              <span className="badge badge-sand" title="Paid from another fund — doesn't affect PCF">
+              <span
+                className={"badge " + paidFromBadgeClasses("other")}
+                title="Paid from another fund — doesn't affect PCF"
+              >
                 <Landmark className="w-3 h-3" /> Other fund
               </span>
             ) : (
-              <span className="badge badge-leaf" title="Drawn from pooled petty cash">
+              <span
+                className={"badge " + paidFromBadgeClasses("pcf")}
+                title="Drawn from pooled petty cash"
+              >
                 <Wallet className="w-3 h-3" /> PCF
               </span>
             )}
@@ -253,12 +260,22 @@ export default function StaffEntryDetailPage() {
           (stored once), shown read-only here. */}
       {entry.receiptId && receipt && (
         <div className="px-5 pt-4">
-          <p className="text-sm font-medium text-ink-900 mb-2 flex items-center gap-1.5">
-            <ImageIcon className="w-4 h-4 text-ink-500" /> Receipt
-            {receiptItemCount > 1 && (
-              <span className="text-ink-500 font-normal">· {receiptItemCount} items</span>
+          <div className="flex items-baseline justify-between mb-2">
+            <p className="text-sm font-medium text-ink-900 flex items-center gap-1.5">
+              <ImageIcon className="w-4 h-4 text-ink-500" /> Receipt
+              {receiptItemCount > 1 && (
+                <span className="text-ink-500 font-normal">· {receiptItemCount} items</span>
+              )}
+            </p>
+            {me?.role === "admin" && (
+              <Link
+                href={`/gallery/${entry.receiptId}`}
+                className="text-[11px] text-leaf-600"
+              >
+                Receipt tools ↗
+              </Link>
             )}
-          </p>
+          </div>
           {!receiptPhotoReady ? (
             <div className="rounded-lg border border-sand-200 bg-sand-50 h-32 flex items-center justify-center gap-2 text-ink-500">
               <Loader2 className="w-4 h-4 animate-spin" />

@@ -2,12 +2,13 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertCircle, ArrowUp, MessageSquare, Send } from "lucide-react";
+import { AlertCircle, ArrowUp, ChevronRight, MessageSquare, Send } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { addNoteToEntry, getEntries, getPcfLedger, getUserById } from "@/lib/store";
 import { formatDateTime, peso, relativeDate } from "@/lib/format";
 import { staffCategoryLabel } from "@/lib/category-meta";
+import { paidFromBadgeClasses, paidFromLabel, paidFromRowClasses } from "@/lib/payment-meta";
 import type { Entry } from "@/lib/types";
 
 export default function NotesPage() {
@@ -279,7 +280,10 @@ function NoteThreadCard({
     >
       <Link
         href={`/entries/${entry.id}`}
-        className="block p-3 border-b border-sand-100 hover:bg-sand-50 transition-colors"
+        className={
+          "block p-3 border-b border-sand-100 transition-colors " +
+          paidFromRowClasses(entry.paidFrom)
+        }
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -290,12 +294,19 @@ function NoteThreadCard({
               {entry.vendor} · {entry.item}
             </p>
             <p className="text-[11px] text-ink-500 mt-0.5">
+              <span className={"badge mr-1 " + paidFromBadgeClasses(entry.paidFrom)}>
+                {paidFromLabel(entry.paidFrom)}
+              </span>
               {relativeDate(entry.date)} · {staffCategoryLabel(entry.category)} ·{" "}
               {getUserById(entry.loggedBy)?.name ?? "—"}
             </p>
           </div>
-          <p className="text-sm font-medium text-ink-900 flex-shrink-0">{peso(entry.total)}</p>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <p className="text-sm font-medium text-ink-900">{peso(entry.total)}</p>
+            <ChevronRight className="w-4 h-4 text-ink-300" />
+          </div>
         </div>
+        <p className="text-[11px] text-leaf-600 mt-1.5">Tap to open the full entry</p>
       </Link>
 
       {sortedNotes.length === 0 ? (

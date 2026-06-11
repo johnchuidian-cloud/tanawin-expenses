@@ -9,6 +9,7 @@ import { useStoreTick } from "@/lib/useStoreTick";
 import { getEntries, getPcfLedger, getUserById } from "@/lib/store";
 import { entryInMonth, peso, relativeDate, toMonthKey } from "@/lib/format";
 import { staffCategoryLabel } from "@/lib/category-meta";
+import { paidFromBadgeClasses, paidFromLabel, paidFromRowClasses } from "@/lib/payment-meta";
 import { MonthChips, type MonthScope } from "@/components/MonthChips";
 import type { Entry, PcfLedgerEntry } from "@/lib/types";
 
@@ -298,7 +299,10 @@ export default function EntriesPage() {
                     <Link
                       key={entry.id}
                       href={`/entries/${entry.id}`}
-                      className="flex items-center justify-between p-2.5 rounded-lg bg-white border border-sand-200 hover:bg-sand-50 transition-colors"
+                      className={
+                        "flex items-center justify-between p-2.5 rounded-lg border transition-colors " +
+                        paidFromRowClasses(entry.paidFrom)
+                      }
                     >
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-ink-900 truncate">
@@ -308,10 +312,10 @@ export default function EntriesPage() {
                           {entry.vendor} · {entry.item}
                         </p>
                         <p className="text-[11px] text-ink-500 mt-0.5">
+                          <span className={"badge mr-1 " + paidFromBadgeClasses(entry.paidFrom)}>
+                            {paidFromLabel(entry.paidFrom)}
+                          </span>
                           {staffCategoryLabel(entry.category)} · {logger?.name ?? "—"}
-                          {entry.paidFrom === "other" && (
-                            <span className="ml-1.5 text-ink-500">· Other fund</span>
-                          )}
                           {hasNote && (
                             <span className="ml-1.5 text-ink-700">
                               · {entry.notes.length} note{entry.notes.length === 1 ? "" : "s"}

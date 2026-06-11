@@ -154,7 +154,7 @@ export default function LoginPage() {
             />
             {error && <p className="text-xs text-clay-500 mt-2">{error}</p>}
             <p className="text-[11px] text-ink-300 mt-4 text-center">
-              For prototype: Lexi = 1234, Janice = 0001, Sherill = 0002, Rio = 0003
+              Forgot your PIN? Ask Lexi to reset it.
             </p>
           </div>
         )}

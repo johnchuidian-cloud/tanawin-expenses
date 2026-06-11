@@ -24,6 +24,7 @@ import {
 } from "@/lib/store";
 import { peso, relativeDate } from "@/lib/format";
 import { staffCategoryLabel } from "@/lib/category-meta";
+import { paidFromRowClasses } from "@/lib/payment-meta";
 import { reconciliationStatus } from "@/lib/validation";
 
 export default function StaffReceiptDetailPage() {
@@ -192,7 +193,10 @@ export default function StaffReceiptDetailPage() {
                 <Link
                   key={entry.id}
                   href={`/entries/${entry.id}`}
-                  className="flex items-center justify-between p-2.5 rounded-lg bg-white border border-sand-200 hover:bg-sand-50 transition-colors"
+                  className={
+                    "flex items-center justify-between p-2.5 rounded-lg border transition-colors " +
+                    paidFromRowClasses(entry.paidFrom)
+                  }
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-ink-900 truncate">

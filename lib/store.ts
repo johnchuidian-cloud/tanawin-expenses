@@ -1,6 +1,7 @@
 "use client";
 
 import { supabase } from "./supabase";
+import { reconciliationStatus } from "./validation";
 import { BUILTIN_CATEGORIES } from "./types";
 import type {
   AuditRecord,
@@ -434,8 +435,27 @@ export function ensureReceiptPhoto(id: string): Promise<void> {
  * Bulk-fetch photos for every receipt and entry in a scope — a YYYY-MM month
  * or "all". Used by the pages that genuinely need many photos at once (the
  * gallery, the receipts pack). Returns false if either fetch failed.
+ *
+ * A scope that already completed this session is not refetched (photos are
+ * effectively immutable once logged), and concurrent calls for the same
+ * scope share one request — repeated gallery visits were each re-downloading
+ * tens of MB otherwise.
  */
-export async function loadAllMedia(scope: "all" | string): Promise<boolean> {
+const _mediaScopesLoaded = new Set<string>();
+const _mediaScopesPending = new Map<string, Promise<boolean>>();
+
+export function loadAllMedia(scope: "all" | string): Promise<boolean> {
+  if (_mediaScopesLoaded.has("all") || _mediaScopesLoaded.has(scope)) {
+    return Promise.resolve(true);
+  }
+  const pending = _mediaScopesPending.get(scope);
+  if (pending) return pending;
+  const p = loadAllMediaUncached(scope).finally(() => _mediaScopesPending.delete(scope));
+  _mediaScopesPending.set(scope, p);
+  return p;
+}
+
+async function loadAllMediaUncached(scope: "all" | string): Promise<boolean> {
   try {
     let rq = supabase.from("receipts").select("id,photo_url");
     let eq = supabase.from("entries").select("id,photo_url");
@@ -469,6 +489,7 @@ export async function loadAllMedia(scope: "all" | string): Promise<boolean> {
         ? { ...e, photoUrls: media.photoUrls, photoUrl: media.photoUrls[0], history: media.history }
         : e;
     });
+    _mediaScopesLoaded.add(scope);
     notify();
     return true;
   } catch (err) {
@@ -1072,6 +1093,193 @@ export function addPurchase(input: {
   })();
 
   return { receipt, entries: created };
+}
+
+// ---------- RECEIPT RESTRUCTURING (experimental merge / split / delete) ----------
+
+/** Recompute a receipt's reconciliation status from its current line items. */
+function receiptStatusFor(receipt: Receipt, linked: Entry[]): Receipt["status"] {
+  return reconciliationStatus(receipt.totalTyped, linked.map((e) => e.total)).status;
+}
+
+/**
+ * Merge a duplicate receipt into the one being kept: its line items move to
+ * the kept receipt, then the duplicate receipt row is deleted. If the kept
+ * receipt has no photo and the duplicate does, the photo moves too.
+ *
+ * Persistence order matters (FK): the entries must be re-pointed at the kept
+ * receipt BEFORE the duplicate is deleted, or the delete is rejected while
+ * rows still reference it.
+ */
+export async function mergeReceipts(
+  keepId: string,
+  duplicateId: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  if (keepId === duplicateId) return { ok: false, reason: "Pick a different receipt." };
+  if (!receipts.find((r) => r.id === keepId) || !receipts.find((r) => r.id === duplicateId)) {
+    return { ok: false, reason: "Receipt not found — refresh and try again." };
+  }
+
+  // Load both photos so we can carry the duplicate's over if needed.
+  await Promise.all([ensureReceiptPhoto(keepId), ensureReceiptPhoto(duplicateId)]);
+  const keep = receipts.find((r) => r.id === keepId)!;
+  const duplicate = receipts.find((r) => r.id === duplicateId)!;
+  const adoptPhoto = !keep.photoUrl && !!duplicate.photoUrl;
+  const newPhoto = adoptPhoto ? duplicate.photoUrl : keep.photoUrl;
+
+  const movedIds = entries.filter((e) => e.receiptId === duplicateId).map((e) => e.id);
+  const linkedAfter = entries.filter(
+    (e) => e.receiptId === keepId || e.receiptId === duplicateId,
+  );
+  const status = receiptStatusFor(keep, linkedAfter);
+
+  // Optimistic local update.
+  entries = entries.map((e) =>
+    e.receiptId === duplicateId ? { ...e, receiptId: keepId } : e,
+  );
+  if (adoptPhoto) _receiptPhotoCache.set(keepId, newPhoto);
+  _receiptPhotoCache.delete(duplicateId);
+  receipts = receipts
+    .filter((r) => r.id !== duplicateId)
+    .map((r) => (r.id === keepId ? { ...r, photoUrl: newPhoto, status } : r));
+  notify();
+
+  // Persist, in FK-safe order.
+  if (movedIds.length > 0) {
+    const { error } = await supabase
+      .from("entries")
+      .update({ receipt_id: keepId })
+      .in("id", movedIds);
+    if (error) {
+      console.error("supabase: mergeReceipts entries", error);
+      return { ok: false, reason: "Couldn't move the line items — refresh and try again." };
+    }
+  }
+  const keepUpdate: Record<string, unknown> = { status };
+  if (adoptPhoto) keepUpdate.photo_url = newPhoto;
+  const { error: updErr } = await supabase.from("receipts").update(keepUpdate).eq("id", keepId);
+  if (updErr) console.error("supabase: mergeReceipts keep", updErr);
+  const { error: delErr } = await supabase.from("receipts").delete().eq("id", duplicateId);
+  if (delErr) {
+    console.error("supabase: mergeReceipts delete", delErr);
+    return { ok: false, reason: "Items were moved, but the duplicate receipt couldn't be deleted." };
+  }
+  return { ok: true };
+}
+
+/**
+ * Split one line item off its receipt into a standalone entry. The receipt
+ * photo is copied onto the entry so it keeps its evidence, and a history
+ * record marks the split. If that was the receipt's last line item, the
+ * now-empty receipt is deleted.
+ */
+export async function splitEntryFromReceipt(
+  entryId: string,
+  byUserId: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  const entry = entries.find((e) => e.id === entryId);
+  if (!entry?.receiptId) return { ok: false, reason: "This entry isn't on a receipt." };
+  const receiptId = entry.receiptId;
+
+  // Need the receipt photo (to copy) and the entry's media blob (to merge into).
+  await Promise.all([ensureReceiptPhoto(receiptId), ensureEntryMedia(entryId)]);
+  if (!_entryMediaCache.has(entryId) || !_receiptPhotoCache.has(receiptId)) {
+    return { ok: false, reason: "Couldn't load the photos — check your connection and try again." };
+  }
+
+  const cur = entries.find((e) => e.id === entryId)!;
+  const receipt = receipts.find((r) => r.id === receiptId);
+  const receiptPhoto = _receiptPhotoCache.get(receiptId) ?? "";
+  const photoUrls = receiptPhoto
+    ? [...(cur.photoUrls ?? []), receiptPhoto]
+    : cur.photoUrls ?? [];
+  const history: AuditRecord[] = [
+    ...(cur.history ?? []),
+    {
+      at: new Date().toISOString(),
+      by: byUserId,
+      summary: `Split off its receipt (${cur.vendor}) into a standalone entry`,
+    },
+  ];
+  const remaining = entries.filter((e) => e.receiptId === receiptId && e.id !== entryId);
+  const deleteReceipt = !!receipt && remaining.length === 0;
+  const newStatus = receipt && !deleteReceipt ? receiptStatusFor(receipt, remaining) : undefined;
+
+  // Optimistic local update.
+  _entryMediaCache.set(entryId, { photoUrls, history });
+  entries = entries.map((e) =>
+    e.id === entryId
+      ? { ...e, receiptId: undefined, photoUrls, photoUrl: photoUrls[0], history }
+      : e,
+  );
+  if (deleteReceipt) {
+    receipts = receipts.filter((r) => r.id !== receiptId);
+    _receiptPhotoCache.delete(receiptId);
+  } else if (newStatus) {
+    receipts = receipts.map((r) => (r.id === receiptId ? { ...r, status: newStatus } : r));
+  }
+  notify();
+
+  // Persist: detach the entry first (clears the FK reference), then the receipt.
+  const { error: entErr } = await supabase
+    .from("entries")
+    .update({ receipt_id: null, photo_url: serializeEntryMedia(photoUrls, history) })
+    .eq("id", entryId);
+  if (entErr) {
+    console.error("supabase: splitEntryFromReceipt entry", entErr);
+    return { ok: false, reason: "Couldn't split the entry — refresh and try again." };
+  }
+  if (deleteReceipt) {
+    const { error } = await supabase.from("receipts").delete().eq("id", receiptId);
+    if (error) console.error("supabase: splitEntryFromReceipt delete receipt", error);
+  } else if (newStatus) {
+    const { error } = await supabase
+      .from("receipts")
+      .update({ status: newStatus })
+      .eq("id", receiptId);
+    if (error) console.error("supabase: splitEntryFromReceipt status", error);
+  }
+  return { ok: true };
+}
+
+/**
+ * Delete an entry outright — for true duplicates (the same purchase logged
+ * twice). Removing a PCF entry raises the PCF balance accordingly, which is
+ * correct for a duplicate. If the entry was on a receipt, the receipt's
+ * reconciliation status is recomputed (the receipt itself is kept, photo and
+ * all, even if this was its last line item).
+ */
+export async function deleteEntry(id: string): Promise<{ ok: boolean; reason?: string }> {
+  const entry = entries.find((e) => e.id === id);
+  if (!entry) return { ok: false, reason: "Entry not found." };
+  const receiptId = entry.receiptId;
+
+  entries = entries.filter((e) => e.id !== id);
+  _entryMediaCache.delete(id);
+  let newStatus: Receipt["status"] | undefined;
+  if (receiptId) {
+    const receipt = receipts.find((r) => r.id === receiptId);
+    if (receipt) {
+      const remaining = entries.filter((e) => e.receiptId === receiptId);
+      newStatus = receiptStatusFor(receipt, remaining);
+      receipts = receipts.map((r) => (r.id === receiptId ? { ...r, status: newStatus! } : r));
+    }
+  }
+  notify();
+
+  const { error } = await supabase.from("entries").delete().eq("id", id);
+  if (error) {
+    console.error("supabase: deleteEntry", error);
+    return { ok: false, reason: "Couldn't delete the entry — refresh and try again." };
+  }
+  if (receiptId && newStatus) {
+    const { error: stErr } = await supabase
+      .from("receipts")
+      .update({ status: newStatus })
+      .eq("id", receiptId);
+    if (stErr) console.error("supabase: deleteEntry receipt status", stErr);
+  }
+  return { ok: true };
 }
 
 // ---------- PCF LEDGER ----------

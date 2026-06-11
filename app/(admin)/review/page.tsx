@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
-import { AlertCircle, Check, MessageSquare, X } from "lucide-react";
+import { AlertCircle, Check, ChevronRight, MessageSquare, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
 import {
@@ -12,6 +13,7 @@ import {
   resolveFlag,
 } from "@/lib/store";
 import { formatDateTime, peso, relativeDate } from "@/lib/format";
+import { paidFromBadgeClasses, paidFromLabel, paidFromRowClasses } from "@/lib/payment-meta";
 import type { Entry, FlagKind } from "@/lib/types";
 import PendingTopUpCard from "@/components/PendingTopUpCard";
 
@@ -142,22 +144,39 @@ function FlaggedEntryCard({ entry, myId }: { entry: Entry; myId: string | null }
 
   return (
     <div className="rounded-lg bg-white border border-sand-200 overflow-hidden">
-      <div className="p-3 border-b border-sand-100">
+      {/* Header links to the full entry — review cards summarize, the entry
+          page has the receipt photo, history, and the whole conversation. */}
+      <Link
+        href={`/entries/${entry.id}`}
+        className={
+          "block p-3 border-b border-sand-100 transition-colors " +
+          paidFromRowClasses(entry.paidFrom)
+        }
+      >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-sm text-ink-900 truncate">
               {entry.vendor} · {entry.item}
             </p>
             <p className="text-[11px] text-ink-500 mt-0.5">
+              <span className={"badge mr-1 " + paidFromBadgeClasses(entry.paidFrom)}>
+                {paidFromLabel(entry.paidFrom)}
+              </span>
               {relativeDate(entry.date)} · {entry.category} ·{" "}
               {logger?.name ?? "—"}
             </p>
           </div>
-          <p className="text-sm font-medium text-ink-900 flex-shrink-0">
-            {peso(entry.total)}
-          </p>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <p className="text-sm font-medium text-ink-900">
+              {peso(entry.total)}
+            </p>
+            <ChevronRight className="w-4 h-4 text-ink-300" />
+          </div>
         </div>
-      </div>
+        <p className="text-[11px] text-leaf-600 mt-1.5">
+          Tap to open the full entry — receipt photo, history, and notes
+        </p>
+      </Link>
 
       {/* Open flags (read-only) */}
       <div className="divide-y divide-sand-100">
