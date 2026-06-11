@@ -19,6 +19,7 @@ import { useRouter } from "next/navigation";
 import { User as UserIcon } from "lucide-react";
 import { useCurrentUser, logout } from "@/lib/auth";
 import BottomNav from "@/components/BottomNav";
+import NotificationsBell from "@/components/NotificationsBell";
 
 export default function SharedLayout({ children }: { children: React.ReactNode }) {
   const user = useCurrentUser();
@@ -50,6 +51,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
           </p>
         </div>
         <div className="flex items-center gap-1">
+          <NotificationsBell user={user} />
           <button
             onClick={() => {
               logout();
