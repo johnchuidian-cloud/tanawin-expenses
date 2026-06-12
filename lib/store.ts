@@ -202,12 +202,42 @@ export async function refreshFromSupabase(): Promise<void> {
 
 // ---------- ROW MAPPERS (snake_case DB → camelCase TS) ----------
 
+/**
+ * The users.pin column is overloaded the same way entries.photo_url is
+ * (no DDL possible, so no new columns): a plain "1234" for users without
+ * a recovery code, or '{"v":1,"pin":"1234","rc":"<sha256 hex>"}' once the
+ * admin has generated a forgot-PIN recovery code. Only the hash of the
+ * code is stored — the plaintext is shown once at generation time.
+ */
+function parseUserPin(raw: unknown): { pin: string; recoveryHash?: string } {
+  if (typeof raw !== "string") return { pin: "" };
+  const s = raw.trim();
+  if (s.startsWith("{")) {
+    try {
+      const o = JSON.parse(s) as { pin?: unknown; rc?: unknown };
+      return {
+        pin: typeof o.pin === "string" ? o.pin : "",
+        recoveryHash: typeof o.rc === "string" ? o.rc : undefined,
+      };
+    } catch {
+      return { pin: s };
+    }
+  }
+  return { pin: s };
+}
+
+function serializeUserPin(pin: string, recoveryHash?: string): string {
+  return recoveryHash ? JSON.stringify({ v: 1, pin, rc: recoveryHash }) : pin;
+}
+
 function mapUser(row: Record<string, unknown>): User {
+  const auth = parseUserPin(row.pin);
   return {
     id: row.id as string,
     name: row.name as string,
     role: row.role as User["role"],
-    pin: row.pin as string,
+    pin: auth.pin,
+    recoveryHash: auth.recoveryHash,
   };
 }
 
@@ -718,6 +748,8 @@ export function updateUser(
   id: string,
   patch: { name?: string; pin?: string },
 ): void {
+  const cur = users.find((u) => u.id === id);
+  if (!cur) return;
   const trimmedName = patch.name?.trim();
   const trimmedPin = patch.pin?.trim();
   users = users.map((u) =>
@@ -733,7 +765,9 @@ export function updateUser(
 
   const update: Record<string, string> = {};
   if (trimmedName) update.name = trimmedName;
-  if (trimmedPin) update.pin = trimmedPin;
+  // The pin column may carry the packed recovery hash — preserve it when
+  // the PIN changes (see parseUserPin).
+  if (trimmedPin) update.pin = serializeUserPin(trimmedPin, cur.recoveryHash);
   if (Object.keys(update).length === 0) return;
 
   supabase
@@ -743,6 +777,94 @@ export function updateUser(
     .then(({ error }) => {
       if (error) console.error("supabase: updateUser", error);
     });
+}
+
+// ---------- ADMIN FORGOT-PIN RECOVERY ----------
+
+async function sha256Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Canonical form for comparing recovery codes: uppercase, no dashes/spaces. */
+function normalizeRecoveryCode(code: string): string {
+  return code.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+/**
+ * Generate a fresh recovery code for a user (in practice: the admin),
+ * store only its hash, and return the plaintext ONCE for display. The
+ * caller must tell the user to write it down — it is not recoverable.
+ * Replaces any previous code.
+ */
+export async function generateRecoveryCode(userId: string): Promise<string | null> {
+  const cur = users.find((u) => u.id === userId);
+  if (!cur) return null;
+
+  // 12 chars from an unambiguous alphabet (no 0/O/1/I/L) ≈ 58 bits.
+  const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  const rnd = crypto.getRandomValues(new Uint8Array(12));
+  let raw = "";
+  for (let i = 0; i < 12; i++) raw += alphabet[rnd[i] % alphabet.length];
+  const display = `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
+  const hash = await sha256Hex(raw);
+
+  users = users.map((u) => (u.id === userId ? { ...u, recoveryHash: hash } : u));
+  notify();
+
+  const { error } = await supabase
+    .from("users")
+    .update({ pin: serializeUserPin(cur.pin, hash) })
+    .eq("id", userId);
+  if (error) {
+    console.error("supabase: generateRecoveryCode", error);
+    return null;
+  }
+  return display;
+}
+
+/**
+ * Forgot-PIN failsafe: validate the recovery code and set a new PIN. The
+ * code is one-time — it's cleared on successful use, so the admin should
+ * generate a fresh one from Manage staff afterwards.
+ */
+export async function resetPinWithRecoveryCode(
+  userId: string,
+  code: string,
+  newPin: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  const cur = users.find((u) => u.id === userId);
+  if (!cur) return { ok: false, reason: "User not found — try refreshing." };
+  if (!cur.recoveryHash) {
+    return { ok: false, reason: "No recovery code is set up for this account." };
+  }
+  if (!/^\d{4}$/.test(newPin)) {
+    return { ok: false, reason: "The new PIN must be exactly 4 digits." };
+  }
+  const collision = users.find((u) => u.id !== userId && u.pin === newPin);
+  if (collision) {
+    return { ok: false, reason: "That PIN is already used by someone else — pick another." };
+  }
+  const hash = await sha256Hex(normalizeRecoveryCode(code));
+  if (hash !== cur.recoveryHash) {
+    return { ok: false, reason: "Recovery code doesn't match. Check for typos." };
+  }
+
+  // Success: set the new PIN and burn the code (one-time use).
+  users = users.map((u) =>
+    u.id === userId ? { ...u, pin: newPin, recoveryHash: undefined } : u,
+  );
+  notify();
+
+  const { error } = await supabase
+    .from("users")
+    .update({ pin: serializeUserPin(newPin, undefined) })
+    .eq("id", userId);
+  if (error) {
+    console.error("supabase: resetPinWithRecoveryCode", error);
+    return { ok: false, reason: "Couldn't save the new PIN — check your connection." };
+  }
+  return { ok: true };
 }
 
 // ---------- ENTRIES ----------

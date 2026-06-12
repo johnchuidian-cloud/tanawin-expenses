@@ -80,6 +80,13 @@ export interface User {
   name: string;
   role: Role;
   pin: string; // 4-digit PIN, mocked for v0; replaced by Supabase Auth later
+  /**
+   * SHA-256 hash of the admin's recovery code (forgot-PIN failsafe), or
+   * undefined when none is set. Stored packed inside the users.pin column
+   * as JSON (no-DDL workaround — see parseUserPin in lib/store.ts). The
+   * plaintext code is shown once at generation and never stored.
+   */
+  recoveryHash?: string;
 }
 
 export interface Receipt {

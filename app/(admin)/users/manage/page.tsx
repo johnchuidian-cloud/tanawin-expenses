@@ -16,9 +16,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { ArrowLeft, Check, X as XIcon } from "lucide-react";
+import { ArrowLeft, Check, KeyRound, Loader2, X as XIcon } from "lucide-react";
 import { useStoreTick } from "@/lib/useStoreTick";
-import { getUsers, updateUser } from "@/lib/store";
+import { generateRecoveryCode, getUsers, updateUser } from "@/lib/store";
 
 interface Draft {
   name: string;
@@ -38,6 +38,30 @@ export default function ManageUsersPage() {
   }, [users]);
   const [drafts, setDrafts] = useState<Record<string, Draft>>(initialDrafts);
   const [savedFlash, setSavedFlash] = useState<string | null>(null);
+
+  // Forgot-PIN failsafe: freshly generated recovery codes, shown ONCE per
+  // generation (only the hash is stored). Keyed by user id.
+  const [freshCodes, setFreshCodes] = useState<Record<string, string>>({});
+  const [codeBusy, setCodeBusy] = useState<string | null>(null);
+
+  async function handleGenerateCode(userId: string) {
+    if (codeBusy) return;
+    const existing = users.find((u) => u.id === userId)?.recoveryHash;
+    if (existing) {
+      const ok = window.confirm(
+        "Generate a NEW recovery code?\n\nThe old code stops working immediately — make sure to write the new one down.",
+      );
+      if (!ok) return;
+    }
+    setCodeBusy(userId);
+    const code = await generateRecoveryCode(userId);
+    setCodeBusy(null);
+    if (!code) {
+      window.alert("Couldn't generate a code — check your connection and try again.");
+      return;
+    }
+    setFreshCodes((cur) => ({ ...cur, [userId]: code }));
+  }
 
   // Re-sync drafts when the underlying users list changes (e.g. another
   // tab updated). We only overwrite drafts that haven't been touched.
@@ -199,6 +223,67 @@ export default function ManageUsersPage() {
       <div className="px-5 pt-5 space-y-3">
         <p className="text-[11px] uppercase tracking-wide text-ink-500">Admin</p>
         {admins.map((u) => renderUserRow(u))}
+
+        {/* Forgot-PIN failsafe: a recovery code the admin keeps somewhere
+            safe. "Forgot your PIN?" on the login screen accepts it once. */}
+        {admins.map((u) => {
+          const fresh = freshCodes[u.id];
+          const hasCode = !!u.recoveryHash;
+          const busy = codeBusy === u.id;
+          return (
+            <div
+              key={`rc-${u.id}`}
+              className="p-3 rounded-lg bg-white border border-sand-200"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-ink-900 flex items-center gap-1.5">
+                    <KeyRound className="w-4 h-4 text-leaf-600" />
+                    Forgot-PIN recovery code
+                  </p>
+                  <p className="text-[11px] text-ink-500 mt-0.5">
+                    {hasCode
+                      ? "A code is set. If you forget your PIN, tap “Forgot your PIN?” on the login screen and enter it."
+                      : "No code set — if you forget your PIN there is currently no way to reset it yourself."}
+                  </p>
+                </div>
+                <span className={"badge flex-shrink-0 " + (hasCode ? "badge-leaf" : "badge-amber")}>
+                  {hasCode ? "Set" : "Not set"}
+                </span>
+              </div>
+
+              {fresh && (
+                <div className="mt-3 rounded-lg border border-leaf-300 bg-leaf-50/60 p-3 text-center">
+                  <p className="text-[11px] text-ink-700 mb-1">
+                    Your recovery code — write it down somewhere safe <em>now</em>.
+                    It won&rsquo;t be shown again.
+                  </p>
+                  <p className="text-xl font-semibold tracking-widest text-ink-900 select-all">
+                    {fresh}
+                  </p>
+                </div>
+              )}
+
+              <button
+                onClick={() => handleGenerateCode(u.id)}
+                disabled={busy}
+                className="btn btn-sm mt-3"
+              >
+                {busy ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Generating…
+                  </>
+                ) : (
+                  <>
+                    <KeyRound className="w-3.5 h-3.5" />
+                    {hasCode ? "Generate a new code" : "Generate recovery code"}
+                  </>
+                )}
+              </button>
+            </div>
+          );
+        })}
+
         <p className="text-[10px] text-ink-300 pt-1">
           The admin role itself is fixed. Need to add a new staff member or
           change who the admin is? Contact the developer — those changes

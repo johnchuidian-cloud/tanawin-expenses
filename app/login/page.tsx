@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { User as UserIcon, ShieldCheck, Loader2, RefreshCw, WifiOff } from "lucide-react";
-import { getBootstrapStatus, getUsers, retryBootstrap } from "@/lib/store";
+import { User as UserIcon, ShieldCheck, KeyRound, Loader2, RefreshCw, WifiOff } from "lucide-react";
+import { getBootstrapStatus, getUsers, resetPinWithRecoveryCode, retryBootstrap } from "@/lib/store";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { login } from "@/lib/auth";
 
@@ -15,6 +15,16 @@ export default function LoginPage() {
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  // Admin forgot-PIN failsafe (recovery code generated in Manage staff).
+  const [recoveryMode, setRecoveryMode] = useState(false);
+  const [recoveryCode, setRecoveryCode] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+
+  const selectedUser = selectedName
+    ? users.find((u) => u.name.toLowerCase() === selectedName.toLowerCase())
+    : undefined;
 
   function handleSubmit() {
     if (!selectedName) return;
@@ -31,6 +41,37 @@ export default function LoginPage() {
     setSelectedName(name);
     setPin("");
     setError(null);
+    setRecoveryMode(false);
+    setRecoveryCode("");
+    setNewPin("");
+  }
+
+  async function handleRecoverySubmit() {
+    if (!selectedUser || recoveryBusy) return;
+    if (!recoveryCode.trim()) {
+      setError("Enter your recovery code.");
+      return;
+    }
+    if (!/^\d{4}$/.test(newPin)) {
+      setError("Choose a new 4-digit PIN.");
+      return;
+    }
+    setRecoveryBusy(true);
+    setError(null);
+    const res = await resetPinWithRecoveryCode(selectedUser.id, recoveryCode, newPin);
+    setRecoveryBusy(false);
+    if (!res.ok) {
+      setError(res.reason ?? "Couldn't reset the PIN.");
+      return;
+    }
+    // PIN is updated and the code is used up — log straight in.
+    const user = login(selectedUser.name, newPin);
+    if (user) {
+      window.alert(
+        "PIN updated and you're logged in.\n\nYour recovery code has been used up — generate a new one in Manage staff and write it down.",
+      );
+      router.replace(user.role === "admin" ? "/dashboard" : "/home");
+    }
   }
 
   return (
@@ -113,6 +154,76 @@ export default function LoginPage() {
               </button>
             ))}
           </div>
+        ) : recoveryMode ? (
+          <div className="card p-6">
+            <button
+              onClick={() => {
+                setRecoveryMode(false);
+                setError(null);
+              }}
+              className="text-xs text-ink-500 mb-4 hover:text-ink-900"
+            >
+              ← Back to PIN entry
+            </button>
+            <p className="text-sm font-medium text-ink-900 flex items-center gap-1.5">
+              <KeyRound className="w-4 h-4 text-leaf-600" /> Reset your PIN
+            </p>
+            <p className="text-xs text-ink-500 mt-1 mb-4">
+              Enter the recovery code you generated in Manage staff, then choose
+              a new PIN.
+            </p>
+            <label className="block">
+              <span className="text-[11px] text-ink-500">Recovery code</span>
+              <input
+                type="text"
+                autoFocus
+                autoCapitalize="characters"
+                autoComplete="off"
+                value={recoveryCode}
+                onChange={(e) => {
+                  setRecoveryCode(e.target.value.toUpperCase());
+                  setError(null);
+                }}
+                className="input mt-0.5 text-center tracking-widest font-medium"
+                placeholder="XXXX-XXXX-XXXX"
+              />
+            </label>
+            <label className="block mt-3">
+              <span className="text-[11px] text-ink-500">New 4-digit PIN</span>
+              <input
+                type="password"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={4}
+                value={newPin}
+                onChange={(e) => {
+                  setNewPin(e.target.value.replace(/\D/g, "").slice(0, 4));
+                  setError(null);
+                }}
+                className="input mt-0.5 text-center text-2xl tracking-[0.6em] font-medium"
+                placeholder="• • • •"
+              />
+            </label>
+            {error && <p className="text-xs text-clay-500 mt-2">{error}</p>}
+            <button
+              onClick={handleRecoverySubmit}
+              disabled={recoveryBusy}
+              className="btn-primary w-full mt-4"
+            >
+              {recoveryBusy ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Checking…
+                </>
+              ) : (
+                <>
+                  <KeyRound className="w-4 h-4" /> Set new PIN
+                </>
+              )}
+            </button>
+            <p className="text-[11px] text-ink-300 mt-3 text-center">
+              The code is used up once it works — generate a fresh one afterwards.
+            </p>
+          </div>
         ) : (
           <div className="card p-6">
             <button
@@ -153,9 +264,23 @@ export default function LoginPage() {
               placeholder="• • • •"
             />
             {error && <p className="text-xs text-clay-500 mt-2">{error}</p>}
-            <p className="text-[11px] text-ink-300 mt-4 text-center">
-              Forgot your PIN? Ask Lexi to reset it.
-            </p>
+            {/* Staff PIN resets go through the admin; the admin's own
+                failsafe is the recovery code (set up in Manage staff). */}
+            {selectedUser?.role === "admin" ? (
+              <button
+                onClick={() => {
+                  setRecoveryMode(true);
+                  setError(null);
+                }}
+                className="w-full text-[11px] text-leaf-600 mt-4 text-center hover:underline"
+              >
+                Forgot your PIN? Use your recovery code
+              </button>
+            ) : (
+              <p className="text-[11px] text-ink-300 mt-4 text-center">
+                Forgot your PIN? Ask Lexi to reset it.
+              </p>
+            )}
           </div>
         )}
       </div>
