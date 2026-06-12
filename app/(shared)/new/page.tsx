@@ -68,6 +68,7 @@ export default function NewPurchasePage() {
   const [majorRepair, setMajorRepair] = useState(false);
 
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const numQty = Number(qty) || 0;
   const numUnit = Number(unitPrice) || 0;
@@ -153,8 +154,8 @@ export default function NewPurchasePage() {
     }
   }
 
-  function handleSave() {
-    if (!me) return;
+  async function handleSave() {
+    if (!me || saving) return;
     if (!vendor.trim()) return setError("Vendor is required.");
     if (!date) return setError("Pick a date.");
     if (items.length === 0) return setError("Add at least one item.");
@@ -181,7 +182,11 @@ export default function NewPurchasePage() {
       ).filter((f) => f.kind !== "missing-category"),
     }));
 
-    addPurchase({
+    // Wait for the server to confirm before leaving the page. If the save
+    // fails, everything stays in the form so tapping Save again is enough.
+    setSaving(true);
+    setError(null);
+    const res = await addPurchase({
       vendor: vendor.trim(),
       date,
       photoUrl: photo ?? undefined,
@@ -190,6 +195,11 @@ export default function NewPurchasePage() {
       receiptTotal: receiptTotalNum ?? undefined,
       items: purchaseItems,
     });
+    setSaving(false);
+    if (!res.ok) {
+      setError(res.reason);
+      return;
+    }
 
     router.replace(me.role === "admin" ? "/dashboard" : "/home");
   }
@@ -594,13 +604,22 @@ export default function NewPurchasePage() {
 
         {error && <p className="text-sm text-clay-500">{error}</p>}
 
-        <button onClick={handleSave} className="btn-primary w-full">
-          <Check className="w-4 h-4" />
-          Save purchase
-          {items.length > 0 && (
-            <span className="font-normal opacity-90">
-              · {items.length} item{items.length === 1 ? "" : "s"} · {peso(itemsTotal)}
-            </span>
+        <button onClick={handleSave} disabled={saving} className="btn-primary w-full disabled:opacity-70">
+          {saving ? (
+            <>
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              Saving…
+            </>
+          ) : (
+            <>
+              <Check className="w-4 h-4" />
+              Save purchase
+              {items.length > 0 && (
+                <span className="font-normal opacity-90">
+                  · {items.length} item{items.length === 1 ? "" : "s"} · {peso(itemsTotal)}
+                </span>
+              )}
+            </>
           )}
         </button>
       </div>

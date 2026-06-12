@@ -213,14 +213,9 @@ export default function ManageUsersPage() {
         </div>
       </div>
 
-      {/* Staff rows — editable */}
+      {/* Admin first (hierarchical order), then staff. Name and PIN are
+          editable for everyone; only the role is fixed. */}
       <div className="px-5 pt-4 space-y-3">
-        <p className="text-[11px] uppercase tracking-wide text-ink-500">Staff</p>
-        {staff.map((u) => renderUserRow(u))}
-      </div>
-
-      {/* Admin row — name and PIN editable like staff; only the role is fixed */}
-      <div className="px-5 pt-5 space-y-3">
         <p className="text-[11px] uppercase tracking-wide text-ink-500">Admin</p>
         {admins.map((u) => renderUserRow(u))}
 
@@ -289,6 +284,12 @@ export default function ManageUsersPage() {
           change who the admin is? Contact the developer — those changes
           require a database update.
         </p>
+      </div>
+
+      {/* Staff rows — editable */}
+      <div className="px-5 pt-5 space-y-3">
+        <p className="text-[11px] uppercase tracking-wide text-ink-500">Staff</p>
+        {staff.map((u) => renderUserRow(u))}
       </div>
 
       <div className="px-5 pt-6">

@@ -101,6 +101,18 @@ if (typeof window !== "undefined") {
   });
 }
 
+/**
+ * Hierarchical user order everywhere users are listed (login screen,
+ * Manage staff, reports): admin pinned on top, staff below, each group
+ * alphabetical.
+ */
+function sortUsers(list: User[]): User[] {
+  return [...list].sort((a, b) => {
+    if (a.role !== b.role) return a.role === "admin" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 export async function bootstrapFromSupabase(): Promise<void> {
   if (_bootstrapped || _bootstrapping) return;
   _bootstrapping = true;
@@ -120,7 +132,7 @@ export async function bootstrapFromSupabase(): Promise<void> {
       return;
     }
 
-    users = usersRes.data!.map(mapUser);
+    users = sortUsers(usersRes.data!.map(mapUser));
     receipts = receiptsRes.data!.map(mapReceipt);
     entries = entriesRes.data!.map(mapEntry);
     pcfLedger = pcfRes.data!.map(mapPcfLedger);
@@ -182,7 +194,7 @@ export async function refreshFromSupabase(): Promise<void> {
       });
       return;
     }
-    users = usersRes.data!.map(mapUser);
+    users = sortUsers(usersRes.data!.map(mapUser));
     receipts = receiptsRes.data!.map(mapReceipt);
     entries = entriesRes.data!.map(mapEntry);
     pcfLedger = pcfRes.data!.map(mapPcfLedger);
@@ -1110,7 +1122,7 @@ export function updateReceiptStatus(id: string, status: Receipt["status"]): void
  * check; when omitted it defaults to the sum of the line items (so the
  * receipt reconciles cleanly).
  */
-export function addPurchase(input: {
+export async function addPurchase(input: {
   vendor: string;
   date: string;
   photoUrl?: string;
@@ -1126,7 +1138,10 @@ export function addPurchase(input: {
     majorRepair?: boolean;
     flags: Entry["flags"];
   }>;
-}): { receipt: Receipt; entries: Entry[] } {
+}): Promise<
+  | { ok: true; receipt: Receipt; entries: Entry[] }
+  | { ok: false; reason: string }
+> {
   const sum = input.items.reduce((s, it) => s + it.total, 0);
   const totalTyped = input.receiptTotal ?? sum;
   const diff = sum - totalTyped;
@@ -1163,20 +1178,15 @@ export function addPurchase(input: {
     history: [],
   }));
 
-  // Update in-memory state immediately so the UI is instant. Seed the media
-  // caches too — we know the photo and the (empty) entry media at creation.
-  _receiptPhotoCache.set(receipt.id, receipt.photoUrl ?? "");
-  for (const e of created) {
-    _entryMediaCache.set(e.id, { photoUrls: [], history: [] });
-  }
-  receipts = [receipt, ...receipts];
-  entries = [...created, ...entries];
-  notify();
-
-  // Persist in order: the entries' receipt_id has a foreign key to
-  // receipts.id, so the receipt row MUST exist before the entries insert —
-  // otherwise the FK rejects them. Await the receipt, then the entries.
-  (async () => {
+  // Persist FIRST, then update local state. This used to be optimistic
+  // (instant local update + fire-and-forget writes), which meant a failed
+  // write — flaky Wi-Fi, mid-deploy hiccup — looked saved on screen and
+  // silently vanished on the next refresh. Staff lost real entries that
+  // way; an expense tracker must not pretend money was recorded.
+  //
+  // Order matters: the entries' receipt_id has a foreign key to
+  // receipts.id, so the receipt row MUST exist before the entries insert.
+  try {
     const { error: rErr } = await supabase.from("receipts").insert({
       id: receipt.id,
       vendor: receipt.vendor,
@@ -1189,7 +1199,7 @@ export function addPurchase(input: {
     });
     if (rErr) {
       console.error("supabase: addPurchase receipt", rErr);
-      return;
+      return { ok: false, reason: "Couldn't reach the server. Check your internet and tap Save again — your items are still here." };
     }
     const { error: eErr } = await supabase.from("entries").insert(
       created.map((e) => ({
@@ -1211,10 +1221,28 @@ export function addPurchase(input: {
         notes: e.notes,
       })),
     );
-    if (eErr) console.error("supabase: addPurchase entries", eErr);
-  })();
+    if (eErr) {
+      console.error("supabase: addPurchase entries", eErr);
+      // Don't leave an orphaned receipt behind the failed line items.
+      await supabase.from("receipts").delete().eq("id", receipt.id);
+      return { ok: false, reason: "The save didn't go through. Check your internet and tap Save again — your items are still here." };
+    }
+  } catch (err) {
+    console.error("supabase: addPurchase threw", err);
+    return { ok: false, reason: "No connection. Check your internet and tap Save again — your items are still here." };
+  }
 
-  return { receipt, entries: created };
+  // Server confirmed — now reflect it locally. Seed the media caches too:
+  // we know the photo and the (empty) entry media at creation.
+  _receiptPhotoCache.set(receipt.id, receipt.photoUrl ?? "");
+  for (const e of created) {
+    _entryMediaCache.set(e.id, { photoUrls: [], history: [] });
+  }
+  receipts = [receipt, ...receipts];
+  entries = [...created, ...entries];
+  notify();
+
+  return { ok: true, receipt, entries: created };
 }
 
 // ---------- RECEIPT RESTRUCTURING (experimental merge / split / delete) ----------
