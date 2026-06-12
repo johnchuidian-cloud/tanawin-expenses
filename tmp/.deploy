@@ -24,3 +24,4 @@ trigger
 2026-06-12a — home-screen install: web app manifest + Tanawin icons (iOS/Android)
 2026-06-12b — home-screen icon swapped to the T monogram
 2026-06-12c — dedicated maskable icon so Android fills the circle with maroon
+2026-06-12d — admin can edit her own name/PIN on Manage staff; PIN no longer shown in plain text

@@ -87,6 +87,90 @@ export default function ManageUsersPage() {
   const admins = users.filter((u) => u.role === "admin");
   const staff = users.filter((u) => u.role === "staff");
 
+  // Shared editable row — staff and admin alike can have their name and PIN
+  // changed here. Only the ROLE is fixed; Lexi edits her own PIN like
+  // anyone else's.
+  function renderUserRow(u: { id: string; name: string }) {
+    const d = draftFor(u.id);
+    const dirty = isDirty(u.id);
+    const saved = savedFlash === u.id;
+    return (
+      <div
+        key={u.id}
+        className="p-3 rounded-lg bg-white border border-sand-200 space-y-2"
+      >
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block">
+            <span className="text-[11px] text-ink-500">Name</span>
+            <input
+              type="text"
+              value={d.name}
+              onChange={(e) =>
+                setDrafts((cur) => ({
+                  ...cur,
+                  [u.id]: { ...draftFor(u.id), name: e.target.value },
+                }))
+              }
+              className="input mt-0.5"
+              placeholder="e.g. Janice"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[11px] text-ink-500">4-digit PIN</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="\d{4}"
+              maxLength={4}
+              value={d.pin}
+              onChange={(e) =>
+                setDrafts((cur) => ({
+                  ...cur,
+                  [u.id]: {
+                    ...draftFor(u.id),
+                    // Strip non-digits as the user types so phones don't
+                    // accidentally insert spaces / suggestions.
+                    pin: e.target.value.replace(/\D/g, "").slice(0, 4),
+                  },
+                }))
+              }
+              className="input mt-0.5 tracking-[0.4em] text-center"
+              placeholder="• • • •"
+            />
+          </label>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[10px] text-ink-300">User ID: {u.id}</p>
+          <div className="flex items-center gap-2">
+            {dirty && (
+              <button
+                onClick={() => syncDraft(u.id)}
+                className="text-[11px] text-ink-500 hover:text-ink-700 inline-flex items-center gap-0.5"
+                aria-label="Revert changes"
+              >
+                <XIcon className="w-3 h-3" />
+                Revert
+              </button>
+            )}
+            <button
+              onClick={() => handleSave(u.id)}
+              disabled={!dirty}
+              className={
+                "btn btn-sm " +
+                (dirty
+                  ? "bg-leaf-500 text-white border-leaf-500"
+                  : "bg-sand-100 text-ink-300 border-sand-100 cursor-not-allowed")
+              }
+            >
+              {saved ? <Check className="w-3.5 h-3.5" /> : null}
+              {saved ? "Saved" : "Save"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="pb-4">
       <div className="px-5 pt-4 pb-3 border-b border-sand-200 flex items-center gap-2">
@@ -108,105 +192,17 @@ export default function ManageUsersPage() {
       {/* Staff rows — editable */}
       <div className="px-5 pt-4 space-y-3">
         <p className="text-[11px] uppercase tracking-wide text-ink-500">Staff</p>
-        {staff.map((u) => {
-          const d = draftFor(u.id);
-          const dirty = isDirty(u.id);
-          const saved = savedFlash === u.id;
-          return (
-            <div
-              key={u.id}
-              className="p-3 rounded-lg bg-white border border-sand-200 space-y-2"
-            >
-              <div className="grid grid-cols-2 gap-2">
-                <label className="block">
-                  <span className="text-[11px] text-ink-500">Name</span>
-                  <input
-                    type="text"
-                    value={d.name}
-                    onChange={(e) =>
-                      setDrafts((cur) => ({
-                        ...cur,
-                        [u.id]: { ...draftFor(u.id), name: e.target.value },
-                      }))
-                    }
-                    className="input mt-0.5"
-                    placeholder="e.g. Janice"
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-[11px] text-ink-500">4-digit PIN</span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="\d{4}"
-                    maxLength={4}
-                    value={d.pin}
-                    onChange={(e) =>
-                      setDrafts((cur) => ({
-                        ...cur,
-                        [u.id]: {
-                          ...draftFor(u.id),
-                          // Strip non-digits as the user types so phones don't
-                          // accidentally insert spaces / suggestions.
-                          pin: e.target.value.replace(/\D/g, "").slice(0, 4),
-                        },
-                      }))
-                    }
-                    className="input mt-0.5 tracking-[0.4em] text-center"
-                    placeholder="• • • •"
-                  />
-                </label>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-[10px] text-ink-300">User ID: {u.id}</p>
-                <div className="flex items-center gap-2">
-                  {dirty && (
-                    <button
-                      onClick={() => syncDraft(u.id)}
-                      className="text-[11px] text-ink-500 hover:text-ink-700 inline-flex items-center gap-0.5"
-                      aria-label="Revert changes"
-                    >
-                      <XIcon className="w-3 h-3" />
-                      Revert
-                    </button>
-                  )}
-                  <button
-                    onClick={() => handleSave(u.id)}
-                    disabled={!dirty}
-                    className={
-                      "btn btn-sm " +
-                      (dirty
-                        ? "bg-leaf-500 text-white border-leaf-500"
-                        : "bg-sand-100 text-ink-300 border-sand-100 cursor-not-allowed")
-                    }
-                  >
-                    {saved ? <Check className="w-3.5 h-3.5" /> : null}
-                    {saved ? "Saved" : "Save"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-        })}
+        {staff.map((u) => renderUserRow(u))}
       </div>
 
-      {/* Admin row — read-only for awareness */}
-      <div className="px-5 pt-5 space-y-2">
+      {/* Admin row — name and PIN editable like staff; only the role is fixed */}
+      <div className="px-5 pt-5 space-y-3">
         <p className="text-[11px] uppercase tracking-wide text-ink-500">Admin</p>
-        {admins.map((u) => (
-          <div
-            key={u.id}
-            className="p-3 rounded-lg bg-sand-50 border border-sand-200"
-          >
-            <p className="text-sm font-medium text-ink-900">{u.name}</p>
-            <p className="text-[11px] text-ink-500 mt-0.5">
-              PIN {u.pin} · admin role is fixed for now
-            </p>
-          </div>
-        ))}
-        <p className="text-[10px] text-ink-300 pt-2">
-          Need to add a new staff member or change the admin? Contact the
-          developer — those changes require a database update.
+        {admins.map((u) => renderUserRow(u))}
+        <p className="text-[10px] text-ink-300 pt-1">
+          The admin role itself is fixed. Need to add a new staff member or
+          change who the admin is? Contact the developer — those changes
+          require a database update.
         </p>
       </div>
 
