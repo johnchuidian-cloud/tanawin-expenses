@@ -5,7 +5,7 @@ export const runtime = "edge";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { AlertCircle, ArrowLeft, Check, RefreshCw, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, Check, Plus, RefreshCw, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
 import {
@@ -232,6 +232,23 @@ function EditEntryForm({ entry, me }: { entry: Entry; me: User }) {
       </div>
 
       <div className="px-5 pt-5 space-y-4">
+        {/* This entry is one line of a multi-item receipt — offer to add a
+            missing item to the same purchase instead of editing this one. */}
+        {entry.receiptId && (
+          <Link
+            href={`/new?receiptId=${entry.receiptId}`}
+            className="flex items-center gap-2 p-3 rounded-lg border border-leaf-200 bg-leaf-50/50 hover:bg-leaf-50 transition-colors"
+          >
+            <Plus className="w-4 h-4 text-leaf-600 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm text-ink-900">Missing an item from this receipt?</p>
+              <p className="text-[11px] text-ink-500 mt-0.5">
+                Add a new item to the same purchase — photo, date, and fund carry over.
+              </p>
+            </div>
+          </Link>
+        )}
+
         <div>
           <label htmlFor="vendor" className="label">Vendor</label>
           <input

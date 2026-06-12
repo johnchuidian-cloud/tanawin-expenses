@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   ArrowLeft,
@@ -16,7 +16,14 @@ import {
   X,
 } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
-import { addPurchase, getCategoryDefs, getEntries } from "@/lib/store";
+import {
+  addItemsToReceipt,
+  addPurchase,
+  getCategoryDefs,
+  getEntries,
+  getEntriesByReceipt,
+  getReceiptById,
+} from "@/lib/store";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { peso, toIsoDate } from "@/lib/format";
 import { fileToCompressedDataUrl } from "@/lib/image";
@@ -42,8 +49,20 @@ function newId() {
 export default function NewPurchasePage() {
   useStoreTick();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const me = useCurrentUser();
   const categoryDefs = getCategoryDefs();
+
+  // ---- Append mode: ?receiptId=... adds items to an EXISTING receipt
+  // (reached from an entry's detail/edit page or a receipt page). Vendor,
+  // date, photo, and funding all come from that purchase — the form only
+  // collects the missing items.
+  const appendReceiptId = searchParams.get("receiptId");
+  const appendReceipt = appendReceiptId ? getReceiptById(appendReceiptId) : undefined;
+  const appendMode = !!appendReceipt;
+  const appendSiblings = appendReceipt ? getEntriesByReceipt(appendReceipt.id) : [];
+  const appendPaidFrom: PaymentSource = appendSiblings[0]?.paidFrom ?? "pcf";
+  const appendSiblingsTotal = appendSiblings.reduce((s, e) => s + e.total, 0);
 
   // ---- Shared purchase fields ----
   const [vendor, setVendor] = useState("");
@@ -76,7 +95,11 @@ export default function NewPurchasePage() {
   const editorTotal = totalOverride !== null ? Number(totalOverride) || 0 : computedTotal;
   const totalIsOverridden = totalOverride !== null && editorTotal !== computedTotal;
 
-  const suggestion = useMemo(() => suggestCategory(vendor, itemName), [vendor, itemName]);
+  const effectiveVendor = appendMode ? appendReceipt!.vendor : vendor;
+  const suggestion = useMemo(
+    () => suggestCategory(effectiveVendor, itemName),
+    [effectiveVendor, itemName],
+  );
   const showSuggestion = !!suggestion && category === "";
 
   const suggestMajor = useMemo(
@@ -156,9 +179,12 @@ export default function NewPurchasePage() {
 
   async function handleSave() {
     if (!me || saving) return;
-    if (!vendor.trim()) return setError("Vendor is required.");
-    if (!date) return setError("Pick a date.");
+    if (!appendMode && !vendor.trim()) return setError("Vendor is required.");
+    if (!appendMode && !date) return setError("Pick a date.");
     if (items.length === 0) return setError("Add at least one item.");
+
+    const saveVendor = appendMode ? appendReceipt!.vendor : vendor.trim();
+    const saveDate = appendMode ? appendReceipt!.date : date;
 
     const history = getEntries();
     const purchaseItems = items.map((li) => ({
@@ -170,8 +196,8 @@ export default function NewPurchasePage() {
       majorRepair: li.category === "Maintenance" ? li.majorRepair : undefined,
       flags: flagsForEntry(
         {
-          date,
-          vendor: vendor.trim(),
+          date: saveDate,
+          vendor: saveVendor,
           item: li.item,
           qty: li.qty,
           unitPrice: li.unitPrice,
@@ -186,9 +212,29 @@ export default function NewPurchasePage() {
     // fails, everything stays in the form so tapping Save again is enough.
     setSaving(true);
     setError(null);
+
+    if (appendMode) {
+      const res = await addItemsToReceipt({
+        receiptId: appendReceipt!.id,
+        capturedBy: me.id,
+        paidFrom: appendPaidFrom,
+        items: purchaseItems,
+      });
+      setSaving(false);
+      if (!res.ok) {
+        setError(res.reason);
+        return;
+      }
+      // Land on the receipt so the updated item list is right there.
+      router.replace(
+        me.role === "admin" ? `/gallery/${appendReceipt!.id}` : `/scan/${appendReceipt!.id}`,
+      );
+      return;
+    }
+
     const res = await addPurchase({
-      vendor: vendor.trim(),
-      date,
+      vendor: saveVendor,
+      date: saveDate,
       photoUrl: photo ?? undefined,
       paidFrom,
       capturedBy: me.id,
@@ -216,15 +262,38 @@ export default function NewPurchasePage() {
           <ArrowLeft className="w-4 h-4 text-ink-700" />
         </button>
         <div>
-          <p className="text-base font-medium text-ink-900">Log new expense</p>
+          <p className="text-base font-medium text-ink-900">
+            {appendMode ? "Add items to this receipt" : "Log new expense"}
+          </p>
           <p className="text-[11px] text-ink-500">
-            One receipt, as many tagged items as you need
+            {appendMode
+              ? `${appendReceipt!.vendor} · ${appendReceipt!.date}`
+              : "One receipt, as many tagged items as you need"}
           </p>
         </div>
       </div>
 
       <div className="px-5 pt-5 space-y-5">
+        {/* Append mode: the purchase already exists — show it, don't re-ask. */}
+        {appendMode && (
+          <div className="rounded-lg border border-leaf-200 bg-leaf-50/50 p-3">
+            <p className="text-sm text-ink-900">
+              Adding to <span className="font-medium">{appendReceipt!.vendor}</span>
+            </p>
+            <p className="text-[11px] text-ink-500 mt-0.5">
+              {appendReceipt!.date} · {appendSiblings.length} item
+              {appendSiblings.length === 1 ? "" : "s"} already logged ·{" "}
+              {peso(appendSiblingsTotal)} of {peso(appendReceipt!.totalTyped)} receipt total
+            </p>
+            <p className="text-[11px] text-ink-500 mt-1">
+              New items share the receipt&rsquo;s photo, date, and{" "}
+              {appendPaidFrom === "pcf" ? "PCF" : "Other fund"} payment.
+            </p>
+          </div>
+        )}
+
         {/* Vendor + date */}
+        {!appendMode && (
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
             <label htmlFor="vendor" className="label">Vendor / store</label>
@@ -250,8 +319,10 @@ export default function NewPurchasePage() {
             />
           </div>
         </div>
+        )}
 
         {/* Receipt photo — explicit Take photo / Upload choice */}
+        {!appendMode && (
         <div>
           <p className="label">Receipt photo (optional)</p>
           {photo ? (
@@ -325,6 +396,7 @@ export default function NewPurchasePage() {
             }}
           />
         </div>
+        )}
 
         {/* Items already added */}
         {items.length > 0 && (
@@ -539,6 +611,7 @@ export default function NewPurchasePage() {
         </div>
 
         {/* Paid from */}
+        {!appendMode && (
         <div>
           <p className="label">Paid from</p>
           <div className="grid grid-cols-2 gap-2">
@@ -570,8 +643,10 @@ export default function NewPurchasePage() {
             </button>
           </div>
         </div>
+        )}
 
         {/* Optional receipt total — verify line items add up */}
+        {!appendMode && (
         <div>
           <label htmlFor="receiptTotal" className="label">
             Receipt total (optional)
@@ -601,6 +676,18 @@ export default function NewPurchasePage() {
             </p>
           )}
         </div>
+        )}
+
+        {/* Append mode: live reconciliation against the receipt's total */}
+        {appendMode && items.length > 0 && (
+          <p className="text-[11px] text-ink-500">
+            After saving, items on this receipt will total{" "}
+            <span className="font-medium text-ink-700">
+              {peso(appendSiblingsTotal + itemsTotal)}
+            </span>{" "}
+            of the {peso(appendReceipt!.totalTyped)} printed total.
+          </p>
+        )}
 
         {error && <p className="text-sm text-clay-500">{error}</p>}
 

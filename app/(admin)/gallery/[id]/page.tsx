@@ -13,6 +13,7 @@ import {
   GitMerge,
   Image as ImageIcon,
   Loader2,
+  Plus,
   Scissors,
   Trash2,
 } from "lucide-react";
@@ -255,9 +256,17 @@ export default function AdminGalleryDetailPage() {
       {/* Line items — each opens its entry; split/delete are the experimental
           duplicate-cleanup tools. */}
       <div className="px-5 pt-4">
-        <p className="text-sm font-medium text-ink-900 mb-2">
-          Line items · {linkedEntries.length}
-        </p>
+        <div className="flex items-baseline justify-between mb-2">
+          <p className="text-sm font-medium text-ink-900">
+            Line items · {linkedEntries.length}
+          </p>
+          <Link
+            href={`/new?receiptId=${receipt.id}`}
+            className="btn btn-sm bg-leaf-500 text-white border-leaf-500"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add line item
+          </Link>
+        </div>
         {linkedEntries.length === 0 ? (
           <p className="text-xs text-ink-500">
             No line items logged against this receipt yet.

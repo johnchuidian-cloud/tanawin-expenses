@@ -27,3 +27,4 @@ trigger
 2026-06-12d — admin can edit her own name/PIN on Manage staff; PIN no longer shown in plain text
 2026-06-12e — forgot-PIN failsafe: admin recovery code (generate in Manage staff, use on login)
 2026-06-12f — saves wait for server confirmation (no more silent loss); users ordered admin-first
+2026-06-12g — add items to an existing receipt from entry detail/edit and receipt pages

@@ -1245,6 +1245,108 @@ export async function addPurchase(input: {
   return { ok: true, receipt, entries: created };
 }
 
+/**
+ * Append line items to an EXISTING receipt — used when someone realizes a
+ * logged purchase is missing an item ("edit the entry, add to the same
+ * receipt"). Vendor/date/funding come from the receipt's purchase; the
+ * receipt's reconciliation status is recomputed against the new item sum.
+ *
+ * Same persist-first contract as addPurchase: the server must confirm
+ * before local state changes, so a failed save is visible and retryable.
+ */
+export async function addItemsToReceipt(input: {
+  receiptId: string;
+  capturedBy: string;
+  paidFrom: Entry["paidFrom"];
+  items: Array<{
+    item: string;
+    qty: number;
+    unitPrice: number;
+    total: number;
+    category: string;
+    majorRepair?: boolean;
+    flags: Entry["flags"];
+  }>;
+}): Promise<{ ok: true; entries: Entry[] } | { ok: false; reason: string }> {
+  const receipt = receipts.find((r) => r.id === input.receiptId);
+  if (!receipt) {
+    return { ok: false, reason: "Receipt not found — refresh and try again." };
+  }
+  if (input.items.length === 0) {
+    return { ok: false, reason: "Add at least one item." };
+  }
+
+  const now = new Date().toISOString();
+  const created: Entry[] = input.items.map((it) => ({
+    id: `e_${Math.random().toString(36).slice(2, 10)}`,
+    date: receipt.date,
+    vendor: receipt.vendor,
+    item: it.item,
+    qty: it.qty,
+    unitPrice: it.unitPrice,
+    total: it.total,
+    category: it.category,
+    paidFrom: input.paidFrom,
+    majorRepair: it.majorRepair,
+    receiptId: receipt.id,
+    photoUrls: [],
+    loggedBy: input.capturedBy,
+    createdAt: now,
+    flags: it.flags,
+    notes: [],
+    history: [],
+  }));
+
+  try {
+    const { error } = await supabase.from("entries").insert(
+      created.map((e) => ({
+        id: e.id,
+        date: e.date,
+        vendor: e.vendor,
+        item: e.item,
+        qty: e.qty,
+        unit_price: e.unitPrice,
+        total: e.total,
+        category: e.category,
+        paid_from: e.paidFrom,
+        major_repair: e.majorRepair ?? false,
+        receipt_id: e.receiptId ?? null,
+        photo_url: null,
+        logged_by: e.loggedBy,
+        created_at: e.createdAt,
+        flags: e.flags,
+        notes: e.notes,
+      })),
+    );
+    if (error) {
+      console.error("supabase: addItemsToReceipt", error);
+      return { ok: false, reason: "The save didn't go through. Check your internet and tap Save again — your items are still here." };
+    }
+  } catch (err) {
+    console.error("supabase: addItemsToReceipt threw", err);
+    return { ok: false, reason: "No connection. Check your internet and tap Save again — your items are still here." };
+  }
+
+  // Server confirmed — update local state and recompute the receipt status.
+  const linkedAfter = [
+    ...entries.filter((e) => e.receiptId === receipt.id),
+    ...created,
+  ];
+  const status = receiptStatusFor(receipt, linkedAfter);
+  for (const e of created) {
+    _entryMediaCache.set(e.id, { photoUrls: [], history: [] });
+  }
+  entries = [...created, ...entries];
+  receipts = receipts.map((r) => (r.id === receipt.id ? { ...r, status } : r));
+  notify();
+
+  supabase.from("receipts").update({ status }).eq("id", receipt.id).then(({ error }) => {
+    if (error) console.error("supabase: addItemsToReceipt status", error);
+  });
+
+  return { ok: true, entries: created };
+}
+
 // ---------- RECEIPT RESTRUCTURING (experimental merge / split / delete) ----------
 
 /** Recompute a receipt's reconciliation status from its current line items. */

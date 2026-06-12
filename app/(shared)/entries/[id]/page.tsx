@@ -16,6 +16,7 @@ import {
   Loader2,
   MessageSquare,
   Pencil,
+  Plus,
   Save,
   Send,
   Trash2,
@@ -301,6 +302,12 @@ export default function StaffEntryDetailPage() {
           <p className="text-[11px] text-ink-500 mt-1">
             One of {receiptItemCount} item{receiptItemCount === 1 ? "" : "s"} logged on this receipt.
           </p>
+          <Link
+            href={`/new?receiptId=${entry.receiptId}`}
+            className="btn btn-sm w-full mt-2 text-ink-700"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add another item to this receipt
+          </Link>
         </div>
       )}
 
