@@ -23,3 +23,4 @@ trigger
 2026-06-11c — header notification bell: unanswered replies, pushbacks, rejected top-ups
 2026-06-12a — home-screen install: web app manifest + Tanawin icons (iOS/Android)
 2026-06-12b — home-screen icon swapped to the T monogram
+2026-06-12c — dedicated maskable icon so Android fills the circle with maroon
