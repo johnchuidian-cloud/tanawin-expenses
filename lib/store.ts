@@ -1273,6 +1273,37 @@ export async function addPurchase(input: {
 }
 
 /**
+ * Replace a receipt's photo with a better shot (blurry first attempt,
+ * crumpled receipt re-photographed flat, etc.). Overwrites the old photo —
+ * there's no photo history on receipts. Persist-first: local state only
+ * updates after the server confirms.
+ */
+export async function replaceReceiptPhoto(
+  receiptId: string,
+  photoUrl: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  const receipt = receipts.find((r) => r.id === receiptId);
+  if (!receipt) return { ok: false, reason: "Receipt not found — refresh and try again." };
+  try {
+    const { error } = await supabase
+      .from("receipts")
+      .update({ photo_url: photoUrl })
+      .eq("id", receiptId);
+    if (error) {
+      console.error("supabase: replaceReceiptPhoto", error);
+      return { ok: false, reason: "Couldn't save the new photo — check your internet and try again." };
+    }
+  } catch (err) {
+    console.error("supabase: replaceReceiptPhoto threw", err);
+    return { ok: false, reason: "No connection — check your internet and try again." };
+  }
+  _receiptPhotoCache.set(receiptId, photoUrl);
+  receipts = receipts.map((r) => (r.id === receiptId ? { ...r, photoUrl } : r));
+  notify();
+  return { ok: true };
+}
+
+/**
  * Append line items to an EXISTING receipt — used when someone realizes a
  * logged purchase is missing an item ("edit the entry, add to the same
  * receipt"). Vendor/date/funding come from the receipt's purchase; the

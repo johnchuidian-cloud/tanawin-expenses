@@ -29,3 +29,4 @@ trigger
 2026-06-12f — saves wait for server confirmation (no more silent loss); users ordered admin-first
 2026-06-12g — add items to an existing receipt from entry detail/edit and receipt pages
 2026-06-12h — view-only Guest role for accountants/family (browse entries & reports, no writes)
+2026-06-13a — replace a receipt's photo with a better shot (admin + staff)

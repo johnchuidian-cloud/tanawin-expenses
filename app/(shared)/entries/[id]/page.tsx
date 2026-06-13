@@ -42,6 +42,7 @@ import { formatDate, formatDateTime, peso } from "@/lib/format";
 import { paidFromBadgeClasses } from "@/lib/payment-meta";
 import { fileToCompressedDataUrl } from "@/lib/image";
 import { ImageLightbox } from "@/components/ImageLightbox";
+import ReplaceReceiptPhotoButton from "@/components/ReplaceReceiptPhotoButton";
 import { staffCategoryLabel } from "@/lib/category-meta";
 import type { FlagKind } from "@/lib/types";
 
@@ -306,12 +307,22 @@ export default function StaffEntryDetailPage() {
             One of {receiptItemCount} item{receiptItemCount === 1 ? "" : "s"} logged on this receipt.
           </p>
           {!isGuest && (
-            <Link
-              href={`/new?receiptId=${entry.receiptId}`}
-              className="btn btn-sm w-full mt-2 text-ink-700"
-            >
-              <Plus className="w-3.5 h-3.5" /> Add another item to this receipt
-            </Link>
+            <>
+              <Link
+                href={`/new?receiptId=${entry.receiptId}`}
+                className="btn btn-sm w-full mt-2 text-ink-700"
+              >
+                <Plus className="w-3.5 h-3.5" /> Add another item to this receipt
+              </Link>
+              {receiptPhotoReady && (
+                <div className="mt-2">
+                  <ReplaceReceiptPhotoButton
+                    receiptId={entry.receiptId}
+                    hasPhoto={!!receipt.photoUrl}
+                  />
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

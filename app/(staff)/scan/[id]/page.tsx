@@ -26,6 +26,7 @@ import { peso, relativeDate } from "@/lib/format";
 import { staffCategoryLabel } from "@/lib/category-meta";
 import { paidFromRowClasses } from "@/lib/payment-meta";
 import { reconciliationStatus } from "@/lib/validation";
+import ReplaceReceiptPhotoButton from "@/components/ReplaceReceiptPhotoButton";
 
 export default function StaffReceiptDetailPage() {
   useStoreTick();
@@ -123,6 +124,14 @@ export default function StaffReceiptDetailPage() {
                 {peso(receipt.totalTyped)}
               </p>
             </div>
+            {photoReady && (
+              <div className="mt-2">
+                <ReplaceReceiptPhotoButton
+                  receiptId={receipt.id}
+                  hasPhoto={!!receipt.photoUrl}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>

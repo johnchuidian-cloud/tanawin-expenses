@@ -34,6 +34,7 @@ import {
 import { peso, relativeDate } from "@/lib/format";
 import { paidFromRowClasses } from "@/lib/payment-meta";
 import { reconciliationStatus } from "@/lib/validation";
+import ReplaceReceiptPhotoButton from "@/components/ReplaceReceiptPhotoButton";
 
 export default function AdminGalleryDetailPage() {
   useStoreTick();
@@ -206,6 +207,14 @@ export default function AdminGalleryDetailPage() {
                 {peso(receipt.totalTyped)}
               </p>
             </div>
+            {photoReady && (
+              <div className="mt-2">
+                <ReplaceReceiptPhotoButton
+                  receiptId={receipt.id}
+                  hasPhoto={!!receipt.photoUrl}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>
