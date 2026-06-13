@@ -27,6 +27,7 @@ import { staffCategoryLabel } from "@/lib/category-meta";
 import { paidFromRowClasses } from "@/lib/payment-meta";
 import { reconciliationStatus } from "@/lib/validation";
 import ReplaceReceiptPhotoButton from "@/components/ReplaceReceiptPhotoButton";
+import ReceiptDeletionsLog from "@/components/ReceiptDeletionsLog";
 
 export default function StaffReceiptDetailPage() {
   useStoreTick();
@@ -228,6 +229,9 @@ export default function StaffReceiptDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Read-only record of any line items an admin removed */}
+      <ReceiptDeletionsLog deletions={receipt.deletions} />
     </div>
   );
 }

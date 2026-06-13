@@ -35,6 +35,7 @@ import { peso, relativeDate } from "@/lib/format";
 import { paidFromRowClasses } from "@/lib/payment-meta";
 import { reconciliationStatus } from "@/lib/validation";
 import ReplaceReceiptPhotoButton from "@/components/ReplaceReceiptPhotoButton";
+import ReceiptDeletionsLog from "@/components/ReceiptDeletionsLog";
 
 export default function AdminGalleryDetailPage() {
   useStoreTick();
@@ -118,15 +119,16 @@ export default function AdminGalleryDetailPage() {
   }
 
   async function handleDelete(entryId: string, label: string) {
-    if (busy) return;
+    if (!me || busy) return;
     const ok = window.confirm(
-      `Delete "${label}"?\n\nUse this for true duplicates — the same purchase logged twice. ` +
-        `The amount is removed from the books (PCF balance adjusts). This can't be undone.`,
+      `Delete the line item "${label}"?\n\nIt's removed from this receipt and from the books — ` +
+        `the receipt total reconciliation and the PCF balance adjust automatically, and the ` +
+        `deletion is recorded on this receipt. This can't be undone.`,
     );
     if (!ok) return;
     setBusy(true);
     setToolError(null);
-    const res = await deleteEntry(entryId);
+    const res = await deleteEntry(entryId, me.id);
     setBusy(false);
     if (!res.ok) setToolError(res.reason ?? "Delete failed.");
   }
@@ -329,7 +331,7 @@ export default function AdminGalleryDetailPage() {
                       disabled={busy}
                       className="flex-1 h-8 inline-flex items-center justify-center gap-1.5 text-[11px] font-medium text-clay-500 hover:bg-white/60 disabled:opacity-50"
                     >
-                      <Trash2 className="w-3 h-3" /> Delete duplicate
+                      <Trash2 className="w-3 h-3" /> Delete line item
                     </button>
                   </div>
                 </div>
@@ -338,6 +340,9 @@ export default function AdminGalleryDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Audit trail of removed line items */}
+      <ReceiptDeletionsLog deletions={receipt.deletions} />
 
       {/* Duplicate tools — experimental. Same-vendor receipts, strongest
           duplicate signals first. */}

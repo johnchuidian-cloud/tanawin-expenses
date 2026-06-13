@@ -296,6 +296,41 @@ export function isReceiptPhotoLoaded(id: string): boolean {
   return _receiptPhotoCache.has(id);
 }
 
+/**
+ * The receipts.ocr_text column is overloaded (like photo_url on entries):
+ * plain OCR text, or a JSON blob '{"v":1,"ocr":"...","del":[AuditRecord]}'
+ * once an admin has deleted a line item and we need to log it. ocr_text is
+ * read nowhere else, so this is safe.
+ */
+function parseReceiptOcr(raw: unknown): { ocrText?: string; deletions: AuditRecord[] } {
+  if (typeof raw !== "string" || raw.trim() === "") return { deletions: [] };
+  const s = raw.trim();
+  if (s.startsWith("{")) {
+    try {
+      const o = JSON.parse(s) as { ocr?: unknown; del?: unknown };
+      return {
+        ocrText: typeof o.ocr === "string" ? o.ocr : undefined,
+        deletions: Array.isArray(o.del) ? (o.del as AuditRecord[]) : [],
+      };
+    } catch {
+      return { ocrText: s, deletions: [] };
+    }
+  }
+  return { ocrText: s, deletions: [] };
+}
+
+function serializeReceiptOcr(
+  ocrText: string | undefined,
+  deletions: AuditRecord[],
+): string | null {
+  if (deletions.length === 0) return ocrText && ocrText.trim() ? ocrText : null;
+  return JSON.stringify({
+    v: 1,
+    ...(ocrText && ocrText.trim() ? { ocr: ocrText } : {}),
+    del: deletions,
+  });
+}
+
 function mapReceipt(row: Record<string, unknown>): Receipt {
   const id = row.id as string;
   // Bootstrap/refresh rows omit photo_url; full rows (lazy fetch, inserts)
@@ -303,15 +338,17 @@ function mapReceipt(row: Record<string, unknown>): Receipt {
   if ("photo_url" in row) {
     _receiptPhotoCache.set(id, (row.photo_url ?? "") as string);
   }
+  const ocr = parseReceiptOcr(row.ocr_text);
   return {
     id,
     vendor: row.vendor as string,
     date: row.date as string,
     photoUrl: _receiptPhotoCache.get(id) ?? "",
-    ocrText: row.ocr_text as string | undefined,
+    ocrText: ocr.ocrText,
     totalTyped: row.total_typed as number,
     capturedBy: row.captured_by as string,
     status: row.status as Receipt["status"],
+    deletions: ocr.deletions,
   };
 }
 
@@ -1559,20 +1596,38 @@ export async function splitEntryFromReceipt(
  * reconciliation status is recomputed (the receipt itself is kept, photo and
  * all, even if this was its last line item).
  */
-export async function deleteEntry(id: string): Promise<{ ok: boolean; reason?: string }> {
+export async function deleteEntry(
+  id: string,
+  byUserId?: string,
+): Promise<{ ok: boolean; reason?: string }> {
   const entry = entries.find((e) => e.id === id);
   if (!entry) return { ok: false, reason: "Entry not found." };
   const receiptId = entry.receiptId;
 
   entries = entries.filter((e) => e.id !== id);
   _entryMediaCache.delete(id);
+
+  // When the deleted entry was a line item on a receipt, recompute the
+  // receipt's reconciliation status against the remaining items AND log the
+  // deletion so there's a record of what was removed (the entry itself is
+  // gone). The log lives in the receipt's ocr_text blob.
   let newStatus: Receipt["status"] | undefined;
+  let newOcr: string | null | undefined;
   if (receiptId) {
     const receipt = receipts.find((r) => r.id === receiptId);
     if (receipt) {
       const remaining = entries.filter((e) => e.receiptId === receiptId);
       newStatus = receiptStatusFor(receipt, remaining);
-      receipts = receipts.map((r) => (r.id === receiptId ? { ...r, status: newStatus! } : r));
+      const record: AuditRecord = {
+        at: new Date().toISOString(),
+        by: byUserId ?? entry.loggedBy,
+        summary: `Deleted line item “${entry.item}” · ₱${Math.round(entry.total).toLocaleString()}`,
+      };
+      const deletions = [...(receipt.deletions ?? []), record];
+      newOcr = serializeReceiptOcr(receipt.ocrText, deletions);
+      receipts = receipts.map((r) =>
+        r.id === receiptId ? { ...r, status: newStatus!, deletions } : r,
+      );
     }
   }
   notify();
@@ -1585,7 +1640,7 @@ export async function deleteEntry(id: string): Promise<{ ok: boolean; reason?: s
   if (receiptId && newStatus) {
     const { error: stErr } = await supabase
       .from("receipts")
-      .update({ status: newStatus })
+      .update({ status: newStatus, ocr_text: newOcr })
       .eq("id", receiptId);
     if (stErr) console.error("supabase: deleteEntry receipt status", stErr);
   }

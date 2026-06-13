@@ -105,6 +105,13 @@ export interface Receipt {
   totalTyped: number; // staff types this from reading the receipt
   capturedBy: string; // user ID
   status: "unfinished" | "reconciled" | "mismatch";
+  /**
+   * Log of line items an admin removed from this receipt. The entry itself
+   * is gone, but the deletion is recorded here for the audit trail (who
+   * removed what, when). Packed into the otherwise-unused ocr_text column —
+   * see parseReceiptOcr in lib/store.ts.
+   */
+  deletions?: AuditRecord[];
 }
 
 export interface Entry {
