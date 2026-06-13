@@ -168,6 +168,9 @@ export default function StaffEntryDetailPage() {
   const resolvedFlags = entry.flags.filter((f) => f.resolved);
   // Admins can edit any entry; staff can edit the ones they logged.
   const canEdit = me?.role === "admin" || me?.id === entry.loggedBy;
+  // View-only guests see everything except internal notes, and get no
+  // write affordances (photos, items, replies).
+  const isGuest = me?.role === "guest";
   // When this entry is one line item of a multi-item receipt, the photo lives
   // on the shared receipt (stored once) rather than on the entry itself.
   const receipt = entry.receiptId ? getReceiptById(entry.receiptId) : undefined;
@@ -302,12 +305,14 @@ export default function StaffEntryDetailPage() {
           <p className="text-[11px] text-ink-500 mt-1">
             One of {receiptItemCount} item{receiptItemCount === 1 ? "" : "s"} logged on this receipt.
           </p>
-          <Link
-            href={`/new?receiptId=${entry.receiptId}`}
-            className="btn btn-sm w-full mt-2 text-ink-700"
-          >
-            <Plus className="w-3.5 h-3.5" /> Add another item to this receipt
-          </Link>
+          {!isGuest && (
+            <Link
+              href={`/new?receiptId=${entry.receiptId}`}
+              className="btn btn-sm w-full mt-2 text-ink-700"
+            >
+              <Plus className="w-3.5 h-3.5" /> Add another item to this receipt
+            </Link>
+          )}
         </div>
       )}
 
@@ -355,20 +360,23 @@ export default function StaffEntryDetailPage() {
                     className="w-full h-full object-cover"
                   />
                 </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeletePhoto(idx)}
-                  aria-label={`Delete receipt ${idx + 1}`}
-                  className="absolute top-1 right-1 w-6 h-6 rounded-full bg-white/90 border border-sand-200 flex items-center justify-center hover:bg-clay-50"
-                >
-                  <Trash2 className="w-3.5 h-3.5 text-clay-500" />
-                </button>
+                {!isGuest && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeletePhoto(idx)}
+                    aria-label={`Delete receipt ${idx + 1}`}
+                    className="absolute top-1 right-1 w-6 h-6 rounded-full bg-white/90 border border-sand-200 flex items-center justify-center hover:bg-clay-50"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-clay-500" />
+                  </button>
+                )}
               </div>
             ))}
           </div>
         )}
 
         {/* Add button — full-width when empty, compact row when there are photos */}
+        {!isGuest && (
         <button
           type="button"
           onClick={() => fileInput.current?.click()}
@@ -393,6 +401,7 @@ export default function StaffEntryDetailPage() {
             </>
           )}
         </button>
+        )}
 
         {/* Manual save / discard — only when there are unsaved changes */}
         {photoDirty && (
@@ -516,7 +525,10 @@ export default function StaffEntryDetailPage() {
         </div>
       )}
 
-      {/* Notes thread */}
+      {/* Notes thread — internal team conversation, hidden from view-only
+          guests (accountants/family don't need staff back-and-forth). */}
+      {!isGuest && (
+      <>
       <div className="px-5 pt-4">
         <p className="text-sm font-medium text-ink-900 mb-2">
           Conversation{sortedNotes.length > 0 ? ` · ${sortedNotes.length}` : ""}
@@ -590,6 +602,8 @@ export default function StaffEntryDetailPage() {
           <Send className="w-3.5 h-3.5" /> Send note
         </button>
       </div>
+      </>
+      )}
 
       {lightbox && (
         <ImageLightbox

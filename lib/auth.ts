@@ -18,9 +18,20 @@ import {
   getUserById,
   isBootstrapComplete,
 } from "./store";
-import type { User } from "./types";
+import type { Role, User } from "./types";
 
 const STORAGE_KEY = "tanawin.session.userId";
+
+/**
+ * Where each role lands after login (and where the layouts bounce a user
+ * who wandered into the wrong route group). Guests get the read-only
+ * entries ledger — they have no home dashboard of their own.
+ */
+export function homePathFor(role: Role): string {
+  if (role === "admin") return "/dashboard";
+  if (role === "staff") return "/home";
+  return "/entries";
+}
 
 export function login(name: string, pin: string): User | null {
   if (typeof window === "undefined") return null;

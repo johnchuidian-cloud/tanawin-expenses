@@ -145,9 +145,11 @@ export default function EntriesPage() {
       <div className="px-5 pt-4 pb-3 border-b border-sand-200">
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-base font-medium text-ink-900">Entries</h1>
-          <Link href="/new" className="btn btn-sm bg-leaf-500 text-white border-leaf-500">
-            <Plus className="w-3.5 h-3.5" /> New
-          </Link>
+          {me?.role !== "guest" && (
+            <Link href="/new" className="btn btn-sm bg-leaf-500 text-white border-leaf-500">
+              <Plus className="w-3.5 h-3.5" /> New
+            </Link>
+          )}
         </div>
         {(categoryFilter || staffIdFilter) && (
           <div className="mb-3 flex items-center gap-2 text-xs">

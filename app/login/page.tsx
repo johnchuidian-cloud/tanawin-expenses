@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { User as UserIcon, ShieldCheck, KeyRound, Loader2, RefreshCw, WifiOff } from "lucide-react";
+import { User as UserIcon, ShieldCheck, Eye, KeyRound, Loader2, RefreshCw, WifiOff } from "lucide-react";
 import { getBootstrapStatus, getUsers, resetPinWithRecoveryCode, retryBootstrap } from "@/lib/store";
 import { useStoreTick } from "@/lib/useStoreTick";
-import { login } from "@/lib/auth";
+import { login, homePathFor } from "@/lib/auth";
 
 export default function LoginPage() {
   useStoreTick();
@@ -34,7 +34,7 @@ export default function LoginPage() {
       setPin("");
       return;
     }
-    router.replace(user.role === "admin" ? "/dashboard" : "/home");
+    router.replace(homePathFor(user.role));
   }
 
   function selectUser(name: string) {
@@ -70,7 +70,7 @@ export default function LoginPage() {
       window.alert(
         "PIN updated and you're logged in.\n\nYour recovery code has been used up — generate a new one in Manage staff and write it down.",
       );
-      router.replace(user.role === "admin" ? "/dashboard" : "/home");
+      router.replace(homePathFor(user.role));
     }
   }
 
@@ -145,11 +145,19 @@ export default function LoginPage() {
                     (u.role === "admin" ? "bg-leaf-50 text-leaf-600" : "bg-sand-100 text-ink-700")
                   }
                 >
-                  {u.role === "admin" ? <ShieldCheck className="w-5 h-5" /> : <UserIcon className="w-5 h-5" />}
+                  {u.role === "admin" ? (
+                    <ShieldCheck className="w-5 h-5" />
+                  ) : u.role === "guest" ? (
+                    <Eye className="w-5 h-5" />
+                  ) : (
+                    <UserIcon className="w-5 h-5" />
+                  )}
                 </div>
                 <div className="flex-1">
                   <p className="font-medium text-ink-900">{u.name}</p>
-                  <p className="text-xs text-ink-500">{u.role === "admin" ? "Admin" : "Staff"}</p>
+                  <p className="text-xs text-ink-500">
+                    {u.role === "admin" ? "Admin" : u.role === "guest" ? "View only" : "Staff"}
+                  </p>
                 </div>
               </button>
             ))}
@@ -256,7 +264,7 @@ export default function LoginPage() {
                       setPin("");
                       return;
                     }
-                    router.replace(u.role === "admin" ? "/dashboard" : "/home");
+                    router.replace(homePathFor(u.role));
                   }, 100);
                 }
               }}

@@ -110,6 +110,7 @@ export default function ManageUsersPage() {
 
   const admins = users.filter((u) => u.role === "admin");
   const staff = users.filter((u) => u.role === "staff");
+  const guests = users.filter((u) => u.role === "guest");
 
   // Shared editable row — staff and admin alike can have their name and PIN
   // changed here. Only the ROLE is fixed; Lexi edits her own PIN like
@@ -291,6 +292,21 @@ export default function ManageUsersPage() {
         <p className="text-[11px] uppercase tracking-wide text-ink-500">Staff</p>
         {staff.map((u) => renderUserRow(u))}
       </div>
+
+      {/* View-only guests (accountants, family). Same name/PIN controls —
+          rotate the PIN here whenever access should be revoked. */}
+      {guests.length > 0 && (
+        <div className="px-5 pt-5 space-y-3">
+          <p className="text-[11px] uppercase tracking-wide text-ink-500">
+            Viewers (read-only)
+          </p>
+          {guests.map((u) => renderUserRow(u))}
+          <p className="text-[10px] text-ink-300">
+            Viewers can browse entries and reports but can&rsquo;t add, edit, or
+            comment. Change the PIN here to cut off anyone you&rsquo;ve shared it with.
+          </p>
+        </div>
+      )}
 
       <div className="px-5 pt-6">
         <Link href="/dashboard" className="text-xs text-ink-500">

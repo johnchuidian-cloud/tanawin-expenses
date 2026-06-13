@@ -30,6 +30,13 @@ const STAFF_NAV: NavItem[] = [
   { href: "/notes", label: "Notes", icon: FileText },
 ];
 
+// View-only guests (accountants, family): browse and inspect, never write.
+// No New, no Notes — just the ledger and the category breakdown.
+const GUEST_NAV: NavItem[] = [
+  { href: "/entries", label: "Entries", icon: List },
+  { href: "/categories", label: "Tags", icon: Tags },
+];
+
 // Lexi also logs expenses (utility bills she pays directly), so "New" is
 // in her nav too. Rejected sits next to Review since they're sibling
 // queues — pending vs. needs-follow-up. Tags surfaces the category
@@ -47,6 +54,7 @@ const ADMIN_NAV: NavItem[] = [
 ];
 
 const COL_CLASS: Record<number, string> = {
+  2: "grid-cols-2",
   3: "grid-cols-3",
   4: "grid-cols-4",
   5: "grid-cols-5",
@@ -57,7 +65,8 @@ const COL_CLASS: Record<number, string> = {
 
 export default function BottomNav({ role }: { role: Role }) {
   const pathname = usePathname();
-  const items = role === "admin" ? ADMIN_NAV : STAFF_NAV;
+  const items =
+    role === "admin" ? ADMIN_NAV : role === "guest" ? GUEST_NAV : STAFF_NAV;
   const colClass = COL_CLASS[items.length] ?? "grid-cols-4";
 
   return (

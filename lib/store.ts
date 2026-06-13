@@ -103,12 +103,13 @@ if (typeof window !== "undefined") {
 
 /**
  * Hierarchical user order everywhere users are listed (login screen,
- * Manage staff, reports): admin pinned on top, staff below, each group
- * alphabetical.
+ * Manage staff, reports): admin pinned on top, staff below, view-only
+ * guests last, each group alphabetical.
  */
+const ROLE_RANK: Record<User["role"], number> = { admin: 0, staff: 1, guest: 2 };
 function sortUsers(list: User[]): User[] {
   return [...list].sort((a, b) => {
-    if (a.role !== b.role) return a.role === "admin" ? -1 : 1;
+    if (a.role !== b.role) return ROLE_RANK[a.role] - ROLE_RANK[b.role];
     return a.name.localeCompare(b.name);
   });
 }
@@ -216,20 +217,29 @@ export async function refreshFromSupabase(): Promise<void> {
 
 /**
  * The users.pin column is overloaded the same way entries.photo_url is
- * (no DDL possible, so no new columns): a plain "1234" for users without
- * a recovery code, or '{"v":1,"pin":"1234","rc":"<sha256 hex>"}' once the
- * admin has generated a forgot-PIN recovery code. Only the hash of the
- * code is stored — the plaintext is shown once at generation time.
+ * (no DDL possible, so no new columns): a plain "1234" for plain users, or
+ * a JSON blob '{"v":1,"pin":"1234","rc":"<sha256 hex>","vr":"guest"}' when
+ * extra facts must ride along:
+ *   - rc: hash of the admin's forgot-PIN recovery code (plaintext shown
+ *     once at generation, never stored).
+ *   - vr: view-role override. The DB role column has a CHECK constraint
+ *     allowing only admin/staff, so view-only "guest" users are stored as
+ *     role='staff' with vr:'guest' here.
  */
-function parseUserPin(raw: unknown): { pin: string; recoveryHash?: string } {
+function parseUserPin(raw: unknown): {
+  pin: string;
+  recoveryHash?: string;
+  roleOverride?: User["role"];
+} {
   if (typeof raw !== "string") return { pin: "" };
   const s = raw.trim();
   if (s.startsWith("{")) {
     try {
-      const o = JSON.parse(s) as { pin?: unknown; rc?: unknown };
+      const o = JSON.parse(s) as { pin?: unknown; rc?: unknown; vr?: unknown };
       return {
         pin: typeof o.pin === "string" ? o.pin : "",
         recoveryHash: typeof o.rc === "string" ? o.rc : undefined,
+        roleOverride: o.vr === "guest" ? "guest" : undefined,
       };
     } catch {
       return { pin: s };
@@ -238,8 +248,23 @@ function parseUserPin(raw: unknown): { pin: string; recoveryHash?: string } {
   return { pin: s };
 }
 
-function serializeUserPin(pin: string, recoveryHash?: string): string {
-  return recoveryHash ? JSON.stringify({ v: 1, pin, rc: recoveryHash }) : pin;
+function serializeUserPin(
+  pin: string,
+  recoveryHash?: string,
+  roleOverride?: User["role"],
+): string {
+  if (!recoveryHash && !roleOverride) return pin;
+  return JSON.stringify({
+    v: 1,
+    pin,
+    ...(recoveryHash ? { rc: recoveryHash } : {}),
+    ...(roleOverride === "guest" ? { vr: "guest" } : {}),
+  });
+}
+
+/** The vr blob field is the only place guest-ness lives — derive it back. */
+function roleOverrideFor(u: User): User["role"] | undefined {
+  return u.role === "guest" ? "guest" : undefined;
 }
 
 function mapUser(row: Record<string, unknown>): User {
@@ -247,7 +272,7 @@ function mapUser(row: Record<string, unknown>): User {
   return {
     id: row.id as string,
     name: row.name as string,
-    role: row.role as User["role"],
+    role: auth.roleOverride ?? (row.role as User["role"]),
     pin: auth.pin,
     recoveryHash: auth.recoveryHash,
   };
@@ -777,9 +802,11 @@ export function updateUser(
 
   const update: Record<string, string> = {};
   if (trimmedName) update.name = trimmedName;
-  // The pin column may carry the packed recovery hash — preserve it when
-  // the PIN changes (see parseUserPin).
-  if (trimmedPin) update.pin = serializeUserPin(trimmedPin, cur.recoveryHash);
+  // The pin column may carry the packed recovery hash and the guest role
+  // override — preserve both when the PIN changes (see parseUserPin).
+  if (trimmedPin) {
+    update.pin = serializeUserPin(trimmedPin, cur.recoveryHash, roleOverrideFor(cur));
+  }
   if (Object.keys(update).length === 0) return;
 
   supabase
@@ -826,7 +853,7 @@ export async function generateRecoveryCode(userId: string): Promise<string | nul
 
   const { error } = await supabase
     .from("users")
-    .update({ pin: serializeUserPin(cur.pin, hash) })
+    .update({ pin: serializeUserPin(cur.pin, hash, roleOverrideFor(cur)) })
     .eq("id", userId);
   if (error) {
     console.error("supabase: generateRecoveryCode", error);
@@ -870,7 +897,7 @@ export async function resetPinWithRecoveryCode(
 
   const { error } = await supabase
     .from("users")
-    .update({ pin: serializeUserPin(newPin, undefined) })
+    .update({ pin: serializeUserPin(newPin, undefined, roleOverrideFor(cur)) })
     .eq("id", userId);
   if (error) {
     console.error("supabase: resetPinWithRecoveryCode", error);

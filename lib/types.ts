@@ -6,7 +6,14 @@
  * is one file edit + downstream type errors guide the rest.
  */
 
-export type Role = "admin" | "staff";
+/**
+ * "guest" is a view-only role (accountants, family): can browse entries
+ * and reports but never add, edit, or comment. The DB role column has a
+ * CHECK constraint allowing only admin/staff (no DDL possible), so guests
+ * are stored as role='staff' with a role override packed into the users.pin
+ * JSON blob — see parseUserPin in lib/store.ts.
+ */
+export type Role = "admin" | "staff" | "guest";
 
 /**
  * Category labels are plain strings so admins can add new ones from the

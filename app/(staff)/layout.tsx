@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { User as UserIcon } from "lucide-react";
-import { useCurrentUser, logout } from "@/lib/auth";
+import { useCurrentUser, logout, homePathFor } from "@/lib/auth";
 import BottomNav from "@/components/BottomNav";
 import NotificationsBell from "@/components/NotificationsBell";
 
@@ -16,7 +16,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
     if (user === null) {
       router.replace("/login");
     } else if (user.role !== "staff") {
-      router.replace("/dashboard");
+      router.replace(homePathFor(user.role));
     }
   }, [user, router]);
 

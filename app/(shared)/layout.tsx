@@ -46,7 +46,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
           <p className="text-sm font-medium text-ink-900">
             {user.name}{" "}
             <span className="text-ink-500 font-normal">
-              · {user.role === "admin" ? "Admin" : "Staff"}
+              · {user.role === "admin" ? "Admin" : user.role === "guest" ? "Viewer" : "Staff"}
             </span>
           </p>
         </div>

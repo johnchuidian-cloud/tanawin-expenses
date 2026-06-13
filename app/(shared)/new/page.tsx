@@ -15,7 +15,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useCurrentUser } from "@/lib/auth";
+import { useCurrentUser, homePathFor } from "@/lib/auth";
 import {
   addItemsToReceipt,
   addPurchase,
@@ -247,7 +247,24 @@ export default function NewPurchasePage() {
       return;
     }
 
-    router.replace(me.role === "admin" ? "/dashboard" : "/home");
+    router.replace(homePathFor(me.role));
+  }
+
+  // View-only guests can't log expenses — the nav hides /new, but guard the
+  // route too in case of a direct link. (Placed after all hooks so the hook
+  // order stays identical across renders.)
+  if (me?.role === "guest") {
+    return (
+      <div className="px-5 py-10 flex flex-col items-center text-center">
+        <p className="text-sm text-ink-700">This account is view-only.</p>
+        <p className="text-xs text-ink-500 mt-1">
+          Guests can browse entries and reports but can&rsquo;t add or change anything.
+        </p>
+        <button onClick={() => router.replace("/entries")} className="btn btn-sm mt-4">
+          Back to entries
+        </button>
+      </div>
+    );
   }
 
   return (
