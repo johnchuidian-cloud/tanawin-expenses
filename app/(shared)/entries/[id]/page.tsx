@@ -28,6 +28,7 @@ import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
 import {
   addNoteToEntry,
+  deleteEntry,
   ensureEntryMedia,
   ensureReceiptPhoto,
   getEntriesByReceipt,
@@ -72,6 +73,7 @@ export default function StaffEntryDetailPage() {
 
   const [reply, setReply] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   // Receipt photos are edited locally and committed with a manual Save, so
@@ -176,6 +178,25 @@ export default function StaffEntryDetailPage() {
   // on the shared receipt (stored once) rather than on the entry itself.
   const receipt = entry.receiptId ? getReceiptById(entry.receiptId) : undefined;
   const receiptItemCount = entry.receiptId ? getEntriesByReceipt(entry.receiptId).length : 0;
+
+  async function handleRemove() {
+    if (!entry || !me || removing) return;
+    const onReceipt = !!entry.receiptId;
+    const ok = window.confirm(
+      onReceipt
+        ? `Remove "${entry.item}" from this receipt?\n\nIt's deleted from the books — the receipt reconciliation and the PCF balance adjust, and the removal is recorded on the receipt. You can undo right after.`
+        : `Delete "${entry.item}"?\n\nIt's removed from the books and the PCF balance adjusts. You can undo right after.`,
+    );
+    if (!ok) return;
+    setRemoving(true);
+    const res = await deleteEntry(entry.id, me.id);
+    if (!res.ok) {
+      setRemoving(false);
+      setError(res.reason ?? "Couldn't remove this item.");
+      return;
+    }
+    router.replace(onReceipt ? `/gallery/${entry.receiptId}` : "/entries");
+  }
 
   function handleSendReply() {
     if (!myId || !entry) return;
@@ -614,6 +635,31 @@ export default function StaffEntryDetailPage() {
         </button>
       </div>
       </>
+      )}
+
+      {/* Admin-only: remove this item right where Lexi lands when she taps it
+          (the receipt page also has it). Reversible via the Undo bar. */}
+      {me?.role === "admin" && (
+        <div className="px-5 pt-6">
+          <button
+            onClick={handleRemove}
+            disabled={removing}
+            className="btn-danger-ghost w-full disabled:opacity-60"
+          >
+            {removing ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Trash2 className="w-4 h-4" />
+            )}
+            {entry.receiptId ? "Remove this item from the receipt" : "Delete this entry"}
+          </button>
+          <p className="text-[11px] text-ink-500 mt-1.5 text-center">
+            {entry.receiptId
+              ? "Adjusts the receipt total and PCF balance. You can undo right after."
+              : "Removes it from the books and adjusts the PCF balance. You can undo right after."}
+          </p>
+          {error && <p className="text-xs text-clay-500 mt-1 text-center">{error}</p>}
+        </div>
       )}
 
       {lightbox && (

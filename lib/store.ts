@@ -377,6 +377,12 @@ export async function markReceiptSettled(
 ): Promise<{ ok: boolean; reason?: string }> {
   const receipt = receipts.find((r) => r.id === receiptId);
   if (!receipt) return { ok: false, reason: "Receipt not found — refresh and try again." };
+  // Prior state for undo.
+  const prevStatus = receipt.status;
+  const prevOcr = serializeReceiptOcr(receipt.ocrText, receipt.deletions ?? [], receipt.settled);
+  const prevSettled = receipt.settled;
+  const prevOcrText = receipt.ocrText;
+  const prevDeletions = receipt.deletions;
   const settled = {
     at: new Date().toISOString(),
     by: byUserId,
@@ -395,6 +401,23 @@ export async function markReceiptSettled(
     console.error("supabase: markReceiptSettled", error);
     return { ok: false, reason: "Couldn't save — check your internet and try again." };
   }
+  setUndoable(`Marked “${receipt.vendor}” complete`, async () => {
+    receipts = receipts.map((r) =>
+      r.id === receiptId
+        ? { ...r, settled: prevSettled, status: prevStatus, ocrText: prevOcrText, deletions: prevDeletions }
+        : r,
+    );
+    notify();
+    const { error: e } = await supabase
+      .from("receipts")
+      .update({ status: prevStatus, ocr_text: prevOcr })
+      .eq("id", receiptId);
+    if (e) {
+      console.error("supabase: undo markReceiptSettled", e);
+      return { ok: false, reason: "Undo failed — refresh to check." };
+    }
+    return { ok: true };
+  });
   return { ok: true };
 }
 
@@ -1246,6 +1269,61 @@ export function updateReceiptStatus(id: string, status: Receipt["status"]): void
   });
 }
 
+// ---------- UNDO (session-scoped: reverse YOUR most recent action) ----------
+// Saves hit the shared DB immediately, so "undo" can't be a global time
+// machine. Instead each major action (log purchase, add items, remove item,
+// mark complete) registers an inverse; the header/footer UndoToast offers it
+// for a short window. Only the latest action is held — a new action replaces
+// the previous undoable.
+
+type UndoFn = () => Promise<{ ok: boolean; reason?: string }>;
+let _undo: { label: string; fn: UndoFn } | null = null;
+let _undoSeq = 0;
+
+function setUndoable(label: string, fn: UndoFn): void {
+  _undo = { label, fn };
+  _undoSeq += 1;
+  notify();
+}
+
+/** Current undoable (label + a seq that changes when a new one is registered). */
+export function getUndoable(): { label: string; seq: number } | null {
+  return _undo ? { label: _undo.label, seq: _undoSeq } : null;
+}
+
+export function clearUndoable(): void {
+  if (_undo) {
+    _undo = null;
+    notify();
+  }
+}
+
+export async function performUndo(): Promise<{ ok: boolean; reason?: string }> {
+  const u = _undo;
+  if (!u) return { ok: false, reason: "Nothing to undo." };
+  _undo = null;
+  notify();
+  try {
+    return await u.fn();
+  } catch (err) {
+    console.error("supabase: performUndo threw", err);
+    return { ok: false, reason: "Undo failed — refresh to check the current state." };
+  }
+}
+
+/** Hard-delete entries by id (used by undo inverses). FK-safe on its own. */
+async function _hardDeleteEntries(ids: string[]): Promise<boolean> {
+  if (ids.length === 0) return true;
+  const { error } = await supabase.from("entries").delete().in("id", ids);
+  if (error) {
+    console.error("supabase: _hardDeleteEntries", error);
+    return false;
+  }
+  entries = entries.filter((e) => !ids.includes(e.id));
+  ids.forEach((id) => _entryMediaCache.delete(id));
+  return true;
+}
+
 /**
  * Log a whole purchase in one go: one receipt (photo stored once) plus a
  * line-item Entry per item, each linked to that receipt. This is what the
@@ -1376,6 +1454,24 @@ export async function addPurchase(input: {
   entries = [...created, ...entries];
   notify();
 
+  // Undo = delete the whole purchase (entries first for FK, then receipt).
+  const createdIds = created.map((e) => e.id);
+  setUndoable(
+    `Logged ${created.length} item${created.length === 1 ? "" : "s"} · ${receipt.vendor}`,
+    async () => {
+      const ok = await _hardDeleteEntries(createdIds);
+      const { error } = await supabase.from("receipts").delete().eq("id", receipt.id);
+      if (error) {
+        console.error("supabase: undo addPurchase", error);
+        return { ok: false, reason: "Undo failed — refresh to check." };
+      }
+      receipts = receipts.filter((r) => r.id !== receipt.id);
+      _receiptPhotoCache.delete(receipt.id);
+      notify();
+      return { ok };
+    },
+  );
+
   return { ok: true, receipt, entries: created };
 }
 
@@ -1494,6 +1590,7 @@ export async function addItemsToReceipt(input: {
 
   // Server confirmed — update local state and recompute the receipt status.
   // A settled receipt stays complete regardless of the new item sum.
+  const priorStatus = receipt.status;
   const linkedAfter = [
     ...entries.filter((e) => e.receiptId === receipt.id),
     ...created,
@@ -1509,6 +1606,23 @@ export async function addItemsToReceipt(input: {
   supabase.from("receipts").update({ status }).eq("id", receipt.id).then(({ error }) => {
     if (error) console.error("supabase: addItemsToReceipt status", error);
   });
+
+  // Undo = delete the just-added items and restore the receipt's prior status.
+  const addedIds = created.map((e) => e.id);
+  setUndoable(
+    `Added ${created.length} item${created.length === 1 ? "" : "s"} · ${receipt.vendor}`,
+    async () => {
+      const ok = await _hardDeleteEntries(addedIds);
+      receipts = receipts.map((r) => (r.id === receipt.id ? { ...r, status: priorStatus } : r));
+      notify();
+      const { error } = await supabase
+        .from("receipts")
+        .update({ status: priorStatus })
+        .eq("id", receipt.id);
+      if (error) console.error("supabase: undo addItemsToReceipt", error);
+      return { ok };
+    },
+  );
 
   return { ok: true, entries: created };
 }
@@ -1675,6 +1789,17 @@ export async function deleteEntry(
   if (!entry) return { ok: false, reason: "Entry not found." };
   const receiptId = entry.receiptId;
 
+  // Capture the entry's exact stored row (incl. the packed photo_url blob)
+  // BEFORE deleting, so undo can re-create it faithfully — even if its
+  // photos/history were never lazily loaded into memory.
+  const { data: pre } = await supabase
+    .from("entries")
+    .select("photo_url")
+    .eq("id", id)
+    .maybeSingle();
+  const rawPhotoUrl = (pre?.photo_url ?? null) as string | null;
+  const snapshot = entry;
+
   entries = entries.filter((e) => e.id !== id);
   _entryMediaCache.delete(id);
 
@@ -1684,8 +1809,14 @@ export async function deleteEntry(
   // gone). The log lives in the receipt's ocr_text blob.
   let newStatus: Receipt["status"] | undefined;
   let newOcr: string | null | undefined;
+  // Prior receipt state, captured for undo.
+  const priorReceipt = receiptId ? receipts.find((r) => r.id === receiptId) : undefined;
+  const priorStatus = priorReceipt?.status;
+  const priorDeletions = priorReceipt?.deletions;
+  const priorSettled = priorReceipt?.settled;
+  const priorOcrText = priorReceipt?.ocrText;
   if (receiptId) {
-    const receipt = receipts.find((r) => r.id === receiptId);
+    const receipt = priorReceipt;
     if (receipt) {
       const remaining = entries.filter((e) => e.receiptId === receiptId);
       // A settled receipt stays complete even as line items change.
@@ -1716,6 +1847,56 @@ export async function deleteEntry(
       .eq("id", receiptId);
     if (stErr) console.error("supabase: deleteEntry receipt status", stErr);
   }
+
+  // Undo = re-create the entry exactly, and roll the receipt back to its
+  // pre-deletion status + deletion log.
+  setUndoable(`Removed “${snapshot.item}”`, async () => {
+    const { error: insErr } = await supabase.from("entries").insert({
+      id: snapshot.id,
+      date: snapshot.date,
+      vendor: snapshot.vendor,
+      item: snapshot.item,
+      qty: snapshot.qty,
+      unit_price: snapshot.unitPrice,
+      total: snapshot.total,
+      category: snapshot.category,
+      paid_from: snapshot.paidFrom,
+      major_repair: snapshot.majorRepair ?? false,
+      receipt_id: snapshot.receiptId ?? null,
+      photo_url: rawPhotoUrl,
+      logged_by: snapshot.loggedBy,
+      created_at: snapshot.createdAt,
+      flags: snapshot.flags,
+      notes: snapshot.notes,
+    });
+    if (insErr) {
+      console.error("supabase: undo deleteEntry", insErr);
+      return { ok: false, reason: "Undo failed — refresh to check." };
+    }
+    const media = parseEntryMedia(rawPhotoUrl);
+    _entryMediaCache.set(snapshot.id, media);
+    entries = [
+      { ...snapshot, photoUrls: media.photoUrls, photoUrl: media.photoUrls[0], history: media.history },
+      ...entries,
+    ];
+    if (receiptId && priorReceipt) {
+      receipts = receipts.map((r) =>
+        r.id === receiptId
+          ? { ...r, status: priorStatus!, deletions: priorDeletions, settled: priorSettled, ocrText: priorOcrText }
+          : r,
+      );
+      await supabase
+        .from("receipts")
+        .update({
+          status: priorStatus,
+          ocr_text: serializeReceiptOcr(priorOcrText, priorDeletions ?? [], priorSettled),
+        })
+        .eq("id", receiptId);
+    }
+    notify();
+    return { ok: true };
+  });
+
   return { ok: true };
 }
 
