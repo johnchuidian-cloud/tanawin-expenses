@@ -302,15 +302,23 @@ export function isReceiptPhotoLoaded(id: string): boolean {
  * once an admin has deleted a line item and we need to log it. ocr_text is
  * read nowhere else, so this is safe.
  */
-function parseReceiptOcr(raw: unknown): { ocrText?: string; deletions: AuditRecord[] } {
+function parseReceiptOcr(raw: unknown): {
+  ocrText?: string;
+  deletions: AuditRecord[];
+  settled?: Receipt["settled"];
+} {
   if (typeof raw !== "string" || raw.trim() === "") return { deletions: [] };
   const s = raw.trim();
   if (s.startsWith("{")) {
     try {
-      const o = JSON.parse(s) as { ocr?: unknown; del?: unknown };
+      const o = JSON.parse(s) as { ocr?: unknown; del?: unknown; set?: unknown };
       return {
         ocrText: typeof o.ocr === "string" ? o.ocr : undefined,
         deletions: Array.isArray(o.del) ? (o.del as AuditRecord[]) : [],
+        settled:
+          o.set && typeof o.set === "object"
+            ? (o.set as Receipt["settled"])
+            : undefined,
       };
     } catch {
       return { ocrText: s, deletions: [] };
@@ -322,12 +330,15 @@ function parseReceiptOcr(raw: unknown): { ocrText?: string; deletions: AuditReco
 function serializeReceiptOcr(
   ocrText: string | undefined,
   deletions: AuditRecord[],
+  settled?: Receipt["settled"],
 ): string | null {
-  if (deletions.length === 0) return ocrText && ocrText.trim() ? ocrText : null;
+  const hasOcr = !!(ocrText && ocrText.trim());
+  if (deletions.length === 0 && !settled) return hasOcr ? ocrText! : null;
   return JSON.stringify({
     v: 1,
-    ...(ocrText && ocrText.trim() ? { ocr: ocrText } : {}),
-    del: deletions,
+    ...(hasOcr ? { ocr: ocrText } : {}),
+    ...(deletions.length > 0 ? { del: deletions } : {}),
+    ...(settled ? { set: settled } : {}),
   });
 }
 
@@ -349,7 +360,66 @@ function mapReceipt(row: Record<string, unknown>): Receipt {
     capturedBy: row.captured_by as string,
     status: row.status as Receipt["status"],
     deletions: ocr.deletions,
+    settled: ocr.settled,
   };
+}
+
+/**
+ * Admin override: mark a receipt complete even when the PCF line items don't
+ * sum to the printed total (the gap is a personal / non-PCF purchase the
+ * admin reimburses). Sets the receipt's stored status to reconciled and
+ * records who/when/why in the ocr_text blob (alongside any deletion log).
+ */
+export async function markReceiptSettled(
+  receiptId: string,
+  byUserId: string,
+  note?: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  const receipt = receipts.find((r) => r.id === receiptId);
+  if (!receipt) return { ok: false, reason: "Receipt not found — refresh and try again." };
+  const settled = {
+    at: new Date().toISOString(),
+    by: byUserId,
+    note: note?.trim() || undefined,
+  };
+  const ocr = serializeReceiptOcr(receipt.ocrText, receipt.deletions ?? [], settled);
+  receipts = receipts.map((r) =>
+    r.id === receiptId ? { ...r, settled, status: "reconciled" } : r,
+  );
+  notify();
+  const { error } = await supabase
+    .from("receipts")
+    .update({ status: "reconciled", ocr_text: ocr })
+    .eq("id", receiptId);
+  if (error) {
+    console.error("supabase: markReceiptSettled", error);
+    return { ok: false, reason: "Couldn't save — check your internet and try again." };
+  }
+  return { ok: true };
+}
+
+/** Undo a settled override — reverts to the auto-computed reconciliation. */
+export async function unmarkReceiptSettled(
+  receiptId: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  const receipt = receipts.find((r) => r.id === receiptId);
+  if (!receipt) return { ok: false, reason: "Receipt not found — refresh and try again." };
+  const remaining = entries.filter((e) => e.receiptId === receiptId);
+  const status = receiptStatusFor(receipt, remaining);
+  const ocr = serializeReceiptOcr(receipt.ocrText, receipt.deletions ?? [], undefined);
+  receipts = receipts.map((r) =>
+    r.id === receiptId ? { ...r, settled: undefined, status } : r,
+  );
+  notify();
+  const { error } = await supabase
+    .from("receipts")
+    .update({ status, ocr_text: ocr })
+    .eq("id", receiptId);
+  if (error) {
+    console.error("supabase: unmarkReceiptSettled", error);
+    return { ok: false, reason: "Couldn't save — check your internet and try again." };
+  }
+  return { ok: true };
 }
 
 /**
@@ -1423,11 +1493,12 @@ export async function addItemsToReceipt(input: {
   }
 
   // Server confirmed — update local state and recompute the receipt status.
+  // A settled receipt stays complete regardless of the new item sum.
   const linkedAfter = [
     ...entries.filter((e) => e.receiptId === receipt.id),
     ...created,
   ];
-  const status = receiptStatusFor(receipt, linkedAfter);
+  const status = receipt.settled ? "reconciled" : receiptStatusFor(receipt, linkedAfter);
   for (const e of created) {
     _entryMediaCache.set(e.id, { photoUrls: [], history: [] });
   }
@@ -1617,14 +1688,15 @@ export async function deleteEntry(
     const receipt = receipts.find((r) => r.id === receiptId);
     if (receipt) {
       const remaining = entries.filter((e) => e.receiptId === receiptId);
-      newStatus = receiptStatusFor(receipt, remaining);
+      // A settled receipt stays complete even as line items change.
+      newStatus = receipt.settled ? "reconciled" : receiptStatusFor(receipt, remaining);
       const record: AuditRecord = {
         at: new Date().toISOString(),
         by: byUserId ?? entry.loggedBy,
         summary: `Deleted line item “${entry.item}” · ₱${Math.round(entry.total).toLocaleString()}`,
       };
       const deletions = [...(receipt.deletions ?? []), record];
-      newOcr = serializeReceiptOcr(receipt.ocrText, deletions);
+      newOcr = serializeReceiptOcr(receipt.ocrText, deletions, receipt.settled);
       receipts = receipts.map((r) =>
         r.id === receiptId ? { ...r, status: newStatus!, deletions } : r,
       );

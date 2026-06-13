@@ -25,7 +25,7 @@ import {
 import { peso, relativeDate } from "@/lib/format";
 import { staffCategoryLabel } from "@/lib/category-meta";
 import { paidFromRowClasses } from "@/lib/payment-meta";
-import { reconciliationStatus } from "@/lib/validation";
+import { effectiveReconciliation } from "@/lib/validation";
 import ReplaceReceiptPhotoButton from "@/components/ReplaceReceiptPhotoButton";
 import ReceiptDeletionsLog from "@/components/ReceiptDeletionsLog";
 
@@ -61,13 +61,15 @@ export default function StaffReceiptDetailPage() {
   }
 
   const capturer = getUserById(receipt.capturedBy);
-  const recon = reconciliationStatus(
+  const recon = effectiveReconciliation(
     receipt.totalTyped,
     linkedEntries.map((e) => e.total),
+    !!receipt.settled,
   );
 
-  const statusLabel =
-    recon.status === "reconciled"
+  const statusLabel = recon.settledOverride
+    ? `Complete · ${peso(Math.abs(recon.difference))} settled outside PCF`
+    : recon.status === "reconciled"
       ? "Fully reconciled"
       : recon.status === "mismatch"
         ? `Mismatch · ${recon.difference > 0 ? "over by" : "under by"} ${peso(Math.abs(recon.difference))}`

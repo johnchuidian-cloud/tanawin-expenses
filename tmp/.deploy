@@ -31,3 +31,4 @@ trigger
 2026-06-12h — view-only Guest role for accountants/family (browse entries & reports, no writes)
 2026-06-13a — replace a receipt's photo with a better shot (admin + staff)
 2026-06-13b — admin can delete line items off a receipt; totals adjust + deletion logged on receipt
+2026-06-13c — admin can mark a receipt complete when the gap is a personal/non-PCF purchase

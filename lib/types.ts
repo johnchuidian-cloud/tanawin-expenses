@@ -112,6 +112,18 @@ export interface Receipt {
    * see parseReceiptOcr in lib/store.ts.
    */
   deletions?: AuditRecord[];
+  /**
+   * Admin override marking the receipt complete even though the PCF line
+   * items don't sum to the printed total — e.g. part of the receipt was a
+   * personal / non-PCF purchase the admin will reimburse. When set, the
+   * receipt reads as reconciled everywhere instead of "unfinished/mismatch".
+   * Also packed into the ocr_text blob. `note` optionally explains the gap.
+   */
+  settled?: {
+    at: string;
+    by: string;
+    note?: string;
+  };
 }
 
 export interface Entry {

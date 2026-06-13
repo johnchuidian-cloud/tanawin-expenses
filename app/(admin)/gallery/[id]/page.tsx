@@ -9,11 +9,13 @@ import {
   AlertCircle,
   ArrowLeft,
   Check,
+  CheckCircle2,
   ChevronRight,
   GitMerge,
   Image as ImageIcon,
   Loader2,
   Plus,
+  RotateCcw,
   Scissors,
   Trash2,
 } from "lucide-react";
@@ -28,12 +30,14 @@ import {
   getReceipts,
   getUserById,
   isReceiptPhotoLoaded,
+  markReceiptSettled,
   mergeReceipts,
   splitEntryFromReceipt,
+  unmarkReceiptSettled,
 } from "@/lib/store";
-import { peso, relativeDate } from "@/lib/format";
+import { peso, relativeDate, formatDateTime } from "@/lib/format";
 import { paidFromRowClasses } from "@/lib/payment-meta";
-import { reconciliationStatus } from "@/lib/validation";
+import { effectiveReconciliation } from "@/lib/validation";
 import ReplaceReceiptPhotoButton from "@/components/ReplaceReceiptPhotoButton";
 import ReceiptDeletionsLog from "@/components/ReceiptDeletionsLog";
 
@@ -118,6 +122,34 @@ export default function AdminGalleryDetailPage() {
     if (isLast) router.replace("/gallery");
   }
 
+  async function handleMarkSettled() {
+    if (!me || !receipt || busy) return;
+    const diff = receipt.totalTyped - linkedEntries.reduce((s, e) => s + e.total, 0);
+    const note = window.prompt(
+      `Mark "${receipt.vendor}" complete?\n\n` +
+        `The PCF line items are ${peso(Math.abs(diff))} ${diff > 0 ? "under" : "over"} the ` +
+        `receipt total — use this when the difference is a personal / non-PCF purchase you'll ` +
+        `reimburse. The receipt will show as complete.\n\n` +
+        `Optional note (e.g. "₱${Math.round(Math.abs(diff))} personal grocery, reimbursed"):`,
+      "",
+    );
+    if (note === null) return; // cancelled
+    setBusy(true);
+    setToolError(null);
+    const res = await markReceiptSettled(receipt.id, me.id, note);
+    setBusy(false);
+    if (!res.ok) setToolError(res.reason ?? "Couldn't mark complete.");
+  }
+
+  async function handleUnmarkSettled() {
+    if (!receipt || busy) return;
+    setBusy(true);
+    setToolError(null);
+    const res = await unmarkReceiptSettled(receipt.id);
+    setBusy(false);
+    if (!res.ok) setToolError(res.reason ?? "Couldn't undo.");
+  }
+
   async function handleDelete(entryId: string, label: string) {
     if (!me || busy) return;
     const ok = window.confirm(
@@ -145,13 +177,16 @@ export default function AdminGalleryDetailPage() {
   }
 
   const capturer = getUserById(receipt.capturedBy);
-  const recon = reconciliationStatus(
+  const recon = effectiveReconciliation(
     receipt.totalTyped,
     linkedEntries.map((e) => e.total),
+    !!receipt.settled,
   );
+  const settledBy = receipt.settled ? getUserById(receipt.settled.by)?.name ?? "Admin" : null;
 
-  const statusLabel =
-    recon.status === "reconciled"
+  const statusLabel = recon.settledOverride
+    ? `Complete · ${peso(Math.abs(recon.difference))} settled outside PCF`
+    : recon.status === "reconciled"
       ? "Fully reconciled"
       : recon.status === "mismatch"
         ? `Mismatch · ${recon.difference > 0 ? "over by" : "under by"} ${peso(Math.abs(recon.difference))}`
@@ -260,8 +295,41 @@ export default function AdminGalleryDetailPage() {
               Line items sum to {peso(recon.sum)} · receipt is{" "}
               {peso(receipt.totalTyped)}
             </p>
+            {receipt.settled && (
+              <p className="text-[11px] text-ink-500 mt-1">
+                Marked complete by {settledBy}
+                {receipt.settled.at && ` · ${formatDateTime(receipt.settled.at)}`}
+                {receipt.settled.note && (
+                  <span className="block italic mt-0.5">
+                    &ldquo;{receipt.settled.note}&rdquo;
+                  </span>
+                )}
+              </p>
+            )}
           </div>
         </div>
+
+        {/* Admin override: mark complete when the gap is a personal/non-PCF
+            purchase, or undo a previous mark. */}
+        {receipt.settled ? (
+          <button
+            onClick={handleUnmarkSettled}
+            disabled={busy}
+            className="btn btn-sm mt-2 text-ink-700 disabled:opacity-50"
+          >
+            <RotateCcw className="w-3.5 h-3.5" /> Undo &ldquo;complete&rdquo; — re-check totals
+          </button>
+        ) : (
+          recon.status !== "reconciled" && (
+            <button
+              onClick={handleMarkSettled}
+              disabled={busy}
+              className="btn btn-sm mt-2 text-leaf-700 border-leaf-200 disabled:opacity-50"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" /> Mark complete (difference is non-PCF)
+            </button>
+          )
+        )}
       </div>
 
       {/* Line items — each opens its entry; split/delete are the experimental

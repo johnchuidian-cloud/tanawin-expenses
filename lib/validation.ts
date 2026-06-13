@@ -135,11 +135,17 @@ export function suggestsMajorRepair(
  * Reconciliation status for a receipt: do the linked entries sum to the
  * receipt total within tolerance?
  */
+export interface ReconResult {
+  status: "reconciled" | "mismatch" | "unfinished";
+  sum: number;
+  difference: number;
+}
+
 export function reconciliationStatus(
   receiptTotal: number,
   linkedEntryTotals: number[],
   settings: AppSettings = DEFAULT_SETTINGS,
-): { status: "reconciled" | "mismatch" | "unfinished"; sum: number; difference: number } {
+): ReconResult {
   const sum = linkedEntryTotals.reduce((acc, n) => acc + n, 0);
   const difference = sum - receiptTotal;
   if (linkedEntryTotals.length === 0) {
@@ -152,4 +158,23 @@ export function reconciliationStatus(
   // If sum is greater, that's a mismatch — potentially padding.
   if (sum < receiptTotal) return { status: "unfinished", sum, difference };
   return { status: "mismatch", sum, difference };
+}
+
+/**
+ * Reconciliation that honors an admin "mark as complete" override. When a
+ * receipt is settled (part of it was a personal/non-PCF purchase), it reads
+ * as reconciled everywhere — but `settledOverride` stays true and the real
+ * `difference` is preserved so the UI can still show the non-PCF gap.
+ */
+export function effectiveReconciliation(
+  receiptTotal: number,
+  linkedEntryTotals: number[],
+  settled: boolean,
+  settings: AppSettings = DEFAULT_SETTINGS,
+): ReconResult & { settledOverride: boolean } {
+  const base = reconciliationStatus(receiptTotal, linkedEntryTotals, settings);
+  if (settled && base.status !== "reconciled") {
+    return { status: "reconciled", sum: base.sum, difference: base.difference, settledOverride: true };
+  }
+  return { ...base, settledOverride: false };
 }

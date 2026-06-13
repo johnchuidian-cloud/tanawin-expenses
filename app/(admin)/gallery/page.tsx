@@ -12,7 +12,7 @@ import {
 import { useStoreTick } from "@/lib/useStoreTick";
 import { getEntries, getReceipts, getUserById, loadAllMedia } from "@/lib/store";
 import { peso, relativeDate } from "@/lib/format";
-import { reconciliationStatus } from "@/lib/validation";
+import { effectiveReconciliation } from "@/lib/validation";
 
 type Filter = "all" | "reconciled" | "mismatch" | "unfinished";
 
@@ -44,9 +44,10 @@ export default function AdminGalleryPage() {
     return receipts
       .map((r) => {
         const linked = entries.filter((e) => e.receiptId === r.id);
-        const recon = reconciliationStatus(
+        const recon = effectiveReconciliation(
           r.totalTyped,
           linked.map((e) => e.total),
+          !!r.settled,
         );
         return { receipt: r, linked, recon };
       })

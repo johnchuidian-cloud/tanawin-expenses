@@ -14,7 +14,7 @@
 
 import * as XLSX from "xlsx";
 import { getEntries, getPcfLedger, getReceipts, getUserById } from "./store";
-import { reconciliationStatus } from "./validation";
+import { effectiveReconciliation } from "./validation";
 
 interface EntryRow {
   id: string;
@@ -112,9 +112,10 @@ function buildReceiptRows(): ReceiptRow[] {
   const entries = getEntries();
   return receipts.map((r) => {
     const linked = entries.filter((e) => e.receiptId === r.id);
-    const recon = reconciliationStatus(
+    const recon = effectiveReconciliation(
       r.totalTyped,
       linked.map((e) => e.total),
+      !!r.settled,
     );
     return {
       id: r.id,
@@ -124,7 +125,7 @@ function buildReceiptRows(): ReceiptRow[] {
       "captured by": userName(r.capturedBy),
       "line items": linked.length,
       "line item total": recon.sum,
-      "reconciliation status": recon.status,
+      "reconciliation status": recon.settledOverride ? "settled (non-PCF)" : recon.status,
       difference: recon.difference,
     };
   });
