@@ -51,6 +51,19 @@ export function logout(): void {
 
 export function getCurrentUserId(): string | null {
   if (typeof window === "undefined") return null;
+  // Demo mode: auto-create a session so screenshot/demo visitors land
+  // straight in the app. ?demo=staff / ?demo=guest pick the role;
+  // default is the demo admin. No effect outside NEXT_PUBLIC_DEMO=1.
+  if (
+    process.env.NEXT_PUBLIC_DEMO === "1" &&
+    !sessionStorage.getItem(STORAGE_KEY)
+  ) {
+    const who = new URLSearchParams(window.location.search).get("demo");
+    sessionStorage.setItem(
+      STORAGE_KEY,
+      who === "staff" ? "u_janice" : who === "guest" ? "u_guest" : "u_lexi",
+    );
+  }
   return sessionStorage.getItem(STORAGE_KEY);
 }
 

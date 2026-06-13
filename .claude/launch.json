@@ -6,6 +6,12 @@
       "runtimeExecutable": "cmd.exe",
       "runtimeArgs": ["/c", ".claude\\run-dev.cmd"],
       "port": 3000
+    },
+    {
+      "name": "recipe-prep",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", ".claude\\run-recipe.cmd"],
+      "port": 3100
     }
   ]
 }
