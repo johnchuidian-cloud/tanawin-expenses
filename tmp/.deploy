@@ -37,3 +37,4 @@ trigger
 2026-06-15b — clickable tags drill into filtered feed; analytics checkbox filters (period + tags); spend-by-staff moved to analytics only
 2026-06-15c — analytics + expenses-by-tag chart available to all roles (staff home chart, guest entries-feed chart, guest Analytics nav)
 2026-06-15d — Excel export on the entries page for all roles (guests + staff included)
+2026-06-15e — "Back to analytics" button on tag-filtered entries (from=analytics)
