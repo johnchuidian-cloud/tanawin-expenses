@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   List,
   Menu,
+  PieChart,
   PlusCircle,
   Tags,
   Wallet,
@@ -34,10 +35,12 @@ const STAFF_NAV: NavItem[] = [
 ];
 
 // View-only guests (accountants, family): browse and inspect, never write.
-// No New, no Notes — just the ledger and the category breakdown.
+// No New, no Notes — the ledger, the category breakdown, and the read-only
+// analytics page (their main reason to be here).
 const GUEST_NAV: NavItem[] = [
   { href: "/entries", label: "Entries", icon: List },
   { href: "/categories", label: "Tags", icon: Tags },
+  { href: "/analytics", label: "Analytics", icon: PieChart },
 ];
 
 // Lexi also logs expenses (utility bills she pays directly), so "New" is

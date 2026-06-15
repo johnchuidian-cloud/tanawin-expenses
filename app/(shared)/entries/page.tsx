@@ -11,6 +11,7 @@ import { entryInMonth, peso, relativeDate, toMonthKey } from "@/lib/format";
 import { staffCategoryLabel } from "@/lib/category-meta";
 import { paidFromBadgeClasses, paidFromLabel, paidFromRowClasses } from "@/lib/payment-meta";
 import { MonthChips, type MonthScope } from "@/components/MonthChips";
+import ExpenseByTagChart from "@/components/ExpenseByTagChart";
 import type { Entry, PcfLedgerEntry } from "@/lib/types";
 
 type Filter = "all" | "mine" | "flagged" | "topups";
@@ -112,6 +113,17 @@ export default function EntriesPage() {
   // Totals for the filter-summary line.
   const expenseTotal = expenseRows.reduce((s, r) => s + (r.kind === "expense" ? r.entry.total : 0), 0);
   const topUpTotal = topUpRows.reduce((s, r) => s + (r.kind === "topup" ? r.topup.amount : 0), 0);
+
+  // Guests have no dashboard/home, so they get the expenses-by-tag chart here
+  // on their feed. Built from the currently-visible expenses so it tracks the
+  // active month/search filters.
+  const guestCategoryData = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of expenseRows) {
+      if (r.kind === "expense") map.set(r.entry.category, (map.get(r.entry.category) ?? 0) + r.entry.total);
+    }
+    return Array.from(map.entries()).map(([label, total]) => ({ label, total }));
+  }, [expenseRows]);
 
   // Group by date for visual separation
   const grouped = useMemo(() => {
@@ -225,6 +237,21 @@ export default function EntriesPage() {
               {topUpRows.length} top-up{topUpRows.length === 1 ? "" : "s"} · {peso(topUpTotal)} in
             </span>
           )}
+        </div>
+      )}
+
+      {/* Guests see the expenses-by-tag chart on their feed (they have no
+          dashboard/home). Hidden once they've drilled into a single tag. */}
+      {me?.role === "guest" && !categoryFilter && guestCategoryData.length > 0 && (
+        <div className="px-5 pt-4">
+          <ExpenseByTagChart
+            title="Expenses by tag"
+            data={guestCategoryData}
+            href="/analytics"
+            tagHref={(label) =>
+              `/entries?category=${encodeURIComponent(label)}${monthScope !== "all" ? `&month=${monthScope}` : ""}`
+            }
+          />
         </div>
       )}
 

@@ -23,6 +23,7 @@ import {
   Info,
 } from "lucide-react";
 import { useStoreTick } from "@/lib/useStoreTick";
+import { useCurrentUser, homePathFor } from "@/lib/auth";
 import { getEntries, getUserById } from "@/lib/store";
 import { peso, pesoShort, monthLabel, toMonthKey, entryInMonth } from "@/lib/format";
 import { paidFromLabel } from "@/lib/payment-meta";
@@ -79,9 +80,15 @@ function CheckPill({
 
 export default function AnalyticsPage() {
   useStoreTick();
+  const me = useCurrentUser();
   const entries = getEntries();
   const today = new Date();
   const thisMonth = toMonthKey(today);
+
+  // Back link points at the viewer's own home — admins to the dashboard,
+  // staff/guests to where they actually came from (guests can't see /dashboard).
+  const backHref = me ? homePathFor(me.role) : "/entries";
+  const backLabel = me?.role === "admin" ? "Dashboard" : me?.role === "staff" ? "Home" : "Entries";
 
   // Months that have entries, newest first.
   const availableMonths = useMemo(() => {
@@ -271,8 +278,8 @@ export default function AnalyticsPage() {
     <div className="pb-4">
       {/* Header */}
       <div className="px-5 pt-4 pb-3 bg-white border-b border-sand-200">
-        <Link href="/dashboard" className="text-[11px] text-ink-500 inline-flex items-center gap-1 mb-1">
-          <ChevronLeft className="w-3.5 h-3.5" /> Dashboard
+        <Link href={backHref} className="text-[11px] text-ink-500 inline-flex items-center gap-1 mb-1">
+          <ChevronLeft className="w-3.5 h-3.5" /> {backLabel}
         </Link>
         <div className="flex items-center gap-2">
           <TrendingUp className="w-5 h-5 text-leaf-600" />

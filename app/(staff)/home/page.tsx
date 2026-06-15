@@ -8,8 +8,8 @@ import { useStoreTick } from "@/lib/useStoreTick";
 import { getEntries, getPcfBalance, getPcfLedger, getUserById } from "@/lib/store";
 import { peso, pesoShort, relativeDate, toMonthKey, entryInMonth, monthLabel } from "@/lib/format";
 import { staffCategoryLabel } from "@/lib/category-meta";
-import type { Category } from "@/lib/types";
 import { MonthGrid, type MonthScope } from "@/components/MonthGrid";
+import ExpenseByTagChart from "@/components/ExpenseByTagChart";
 
 export default function StaffHomePage() {
   useStoreTick(); // re-render on store changes
@@ -58,18 +58,15 @@ export default function StaffHomePage() {
 
   const myEntriesInScope = scopedEntries.filter((e) => e.loggedBy === user?.id).length;
 
-  // Top categories for the selected scope
-  const categoryTotals = useMemo(() => {
+  // Expenses by tag for the selected scope — full breakdown (the chart rolls
+  // the long tail into an "Other" slice itself).
+  const categoryData = useMemo(() => {
     const map = new Map<string, number>();
     for (const e of scopedEntries) {
       map.set(e.category, (map.get(e.category) ?? 0) + e.total);
     }
-    return Array.from(map.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 4);
+    return Array.from(map.entries()).map(([label, total]) => ({ label, total }));
   }, [scopedEntries]);
-  const totalForCategoryView = categoryTotals.reduce((s, [, v]) => s + v, 0);
-  const maxCategoryTotal = categoryTotals[0]?.[1] ?? 1;
 
   // Items needing the staff's attention — always all-time; pushback notes
   // don't expire based on the month chip you have selected.
@@ -213,38 +210,25 @@ export default function StaffHomePage() {
         </div>
       </div>
 
-      {/* Top categories */}
-      {categoryTotals.length > 0 && (
+      {/* Expenses by tag — pie by default, toggle to bar. Tapping the chart
+          drills through to the full analytics page (shared with admin/guest). */}
+      {categoryData.length > 0 && (
         <div className="px-5 pt-5">
-          <p className="text-sm font-medium text-ink-900 mb-2">Top categories — {scopeShort}</p>
-          <div className="space-y-2">
-            {categoryTotals.map(([cat, total]) => (
-              <div key={cat}>
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-ink-900">{staffCategoryLabel(cat as Category)}</span>
-                  <span className="text-ink-500">
-                    {peso(total)} · {totalForCategoryView > 0 ? Math.round((total / totalForCategoryView) * 100) : 0}%
-                  </span>
-                </div>
-                <div className="h-1.5 bg-sand-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-leaf-300"
-                    style={{ width: `${(total / maxCategoryTotal) * 100}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-          <Link href="/categories" className="btn btn-sm w-full mt-3 text-ink-500">
-            See all categories ↗
-          </Link>
+          <ExpenseByTagChart
+            title={`Expenses by tag — ${scopeShort}`}
+            data={categoryData}
+            href="/analytics"
+            tagHref={(label) =>
+              `/entries?category=${encodeURIComponent(label)}${scope !== "all" ? `&month=${scope}` : ""}`
+            }
+          />
         </div>
       )}
 
       {/* Month on month */}
       <div className="px-5 pt-5">
         <p className="text-sm font-medium text-ink-900 mb-2">Month on month</p>
-        <div className="flex items-end gap-2 h-28">
+        <div className="flex gap-2 h-28">
           {momData.map((m) => (
             <div key={m.key} className="flex-1 flex flex-col items-center gap-1">
               <div className="w-full flex-1 flex items-end">
