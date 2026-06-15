@@ -31,6 +31,7 @@ PAGES = [
     ("07-receipt.png", "Receipt tools", "Replace a blurry photo, add a missing item, split or delete a line, or mark complete when part was a personal purchase."),
     ("08-staff-home.png", "Staff home", "Staff see the balance, their own spend, and anything the owner has asked them to follow up on."),
     ("09-log-expense.png", "Log an expense", "One receipt, many tagged items, with a smart category suggestion and a live check against the printed total."),
+    ("12-guest-feed.png", "View-only guest", "Accountants and family sign in as a read-only Guest — they browse the ledger, see spend by tag, and open full analytics, but can't edit or log anything."),
 ]
 
 
