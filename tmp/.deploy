@@ -35,3 +35,4 @@ trigger
 2026-06-13d — remove-item button on the entry page (admin); session Undo bar for save/add/remove/settle
 2026-06-15a — hamburger bottom-nav menu; expenses-by-tag pie/bar chart + analytics page with recommendations
 2026-06-15b — clickable tags drill into filtered feed; analytics checkbox filters (period + tags); spend-by-staff moved to analytics only
+2026-06-15c — analytics + expenses-by-tag chart available to all roles (staff home chart, guest entries-feed chart, guest Analytics nav)
