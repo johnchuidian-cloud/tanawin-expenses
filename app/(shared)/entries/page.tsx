@@ -12,6 +12,7 @@ import { staffCategoryLabel } from "@/lib/category-meta";
 import { paidFromBadgeClasses, paidFromLabel, paidFromRowClasses } from "@/lib/payment-meta";
 import { MonthChips, type MonthScope } from "@/components/MonthChips";
 import ExpenseByTagChart from "@/components/ExpenseByTagChart";
+import ExportButton from "@/components/ExportButton";
 import type { Entry, PcfLedgerEntry } from "@/lib/types";
 
 type Filter = "all" | "mine" | "flagged" | "topups";
@@ -157,11 +158,16 @@ export default function EntriesPage() {
       <div className="px-5 pt-4 pb-3 border-b border-sand-200">
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-base font-medium text-ink-900">Entries</h1>
-          {me?.role !== "guest" && (
-            <Link href="/new" className="btn btn-sm bg-leaf-500 text-white border-leaf-500">
-              <Plus className="w-3.5 h-3.5" /> New
-            </Link>
-          )}
+          <div className="flex items-center gap-2">
+            {/* Excel export is available to every role — view-only guests
+                (accountants/family) often need the workbook most. */}
+            <ExportButton variant="sm" />
+            {me?.role !== "guest" && (
+              <Link href="/new" className="btn btn-sm bg-leaf-500 text-white border-leaf-500">
+                <Plus className="w-3.5 h-3.5" /> New
+              </Link>
+            )}
+          </div>
         </div>
         {(categoryFilter || staffIdFilter) && (
           <div className="mb-3 flex items-center gap-2 text-xs">
