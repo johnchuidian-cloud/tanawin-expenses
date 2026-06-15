@@ -6,11 +6,11 @@ A mobile-first expense tracker built for a real bed-and-breakfast in the Philipp
 
 | Owner dashboard | Receipt reconciliation | Log an expense |
 |---|---|---|
-| ![Dashboard](docs/screenshots/02-dashboard.png) | ![Receipt](docs/screenshots/07-receipt.png) | ![Log expense](docs/screenshots/09-log-expense.png) |
+| ![Dashboard](docs/screenshots-v2/02-dashboard.png) | ![Receipt](docs/screenshots-v2/07-receipt.png) | ![Log expense](docs/screenshots-v2/09-log-expense.png) |
 
 | Sign-in (role picker) | Expense ledger | Review queue |
 |---|---|---|
-| ![Login](docs/screenshots/01-login.png) | ![Entries](docs/screenshots/03-entries.png) | ![Review](docs/screenshots/05-review.png) |
+| ![Login](docs/screenshots-v2/01-login.png) | ![Entries](docs/screenshots-v2/03-entries.png) | ![Review](docs/screenshots-v2/05-review.png) |
 
 ---
 

@@ -9,7 +9,7 @@ from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-SHOTS = os.path.join(ROOT, "docs", "screenshots")
+SHOTS = os.path.join(ROOT, "docs", "screenshots-v2")
 OUT = os.path.join(ROOT, "docs", "Tanawin-Operating-Expenses-Demo.pdf")
 
 MAROON = (0.60, 0.21, 0.09)      # #9A3518
