@@ -295,27 +295,9 @@ export default function AdminDashboardPage() {
         </div>
       </div>
 
-      {/* Spend by staff */}
-      {byStaff.length > 0 && (
-        <div className="px-5 pt-5">
-          <p className="text-sm font-medium text-ink-900 mb-2">Spend by staff — {scopeShort}</p>
-          <div className="space-y-1.5">
-            {byStaff.map((s) => (
-              <Link
-                key={s.id}
-                href={`/entries?staffId=${s.id}`}
-                className="flex items-center justify-between p-2.5 rounded-lg bg-white border border-sand-200 hover:bg-sand-50 transition-colors"
-              >
-                <div>
-                  <p className="text-sm text-ink-900">{s.name}</p>
-                  <p className="text-[11px] text-ink-500">{s.count} entr{s.count === 1 ? "y" : "ies"}</p>
-                </div>
-                <p className="text-sm font-medium text-ink-900">{peso(s.total)}</p>
-              </Link>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Spend-by-staff now lives on the analytics page (reached by tapping the
+          chart below) to keep the home feed focused. The `byStaff` count still
+          feeds the "across N staff" stat above. */}
 
       {/* Expenses by tag — pie by default, toggle to bar. Tapping the chart
           drills through to the full analytics page. */}
@@ -325,6 +307,9 @@ export default function AdminDashboardPage() {
             title={`Expenses by tag — ${scopeShort}`}
             data={categoryData}
             href="/analytics"
+            tagHref={(label) =>
+              `/entries?category=${encodeURIComponent(label)}${scope !== "all" ? `&month=${scope}` : ""}`
+            }
           />
         </div>
       )}

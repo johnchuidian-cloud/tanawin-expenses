@@ -14,6 +14,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
+  Check,
   ChevronLeft,
   Lightbulb,
   TrendingUp,
@@ -40,6 +41,42 @@ const TONE_META = {
   info: { Icon: Info, wrap: "bg-sand-50 border-sand-200", icon: "text-ink-500" },
 } as const;
 
+/** Checkbox-style filter pill: a tickable box + label. */
+function CheckPill({
+  checked,
+  onClick,
+  children,
+}: {
+  checked: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      onClick={onClick}
+      className={
+        "inline-flex items-center gap-1.5 pl-1.5 pr-2.5 h-8 rounded-full border text-xs font-medium transition-colors " +
+        (checked
+          ? "bg-leaf-50 border-leaf-300 text-leaf-700"
+          : "bg-white border-sand-200 text-ink-700 hover:bg-sand-50")
+      }
+    >
+      <span
+        className={
+          "w-4 h-4 rounded flex items-center justify-center flex-shrink-0 border " +
+          (checked ? "bg-leaf-500 border-leaf-500 text-white" : "border-sand-300 text-transparent")
+        }
+      >
+        <Check className="w-3 h-3" strokeWidth={3} />
+      </span>
+      {children}
+    </button>
+  );
+}
+
 export default function AnalyticsPage() {
   useStoreTick();
   const entries = getEntries();
@@ -54,24 +91,48 @@ export default function AnalyticsPage() {
     return Array.from(set).sort((a, b) => (a < b ? 1 : -1));
   }, [entries, thisMonth]);
 
-  // Empty selection = all time. Otherwise the union of the chosen months.
+  // Empty month selection = all time; otherwise the union of the chosen
+  // months. Empty tag selection = all tags; otherwise the union of the chosen
+  // tags. Both filters combine (months AND tags).
   const [selected, setSelected] = useState<string[]>([]);
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const isAllTime = selected.length === 0;
 
-  function toggleMonth(key: string) {
-    setSelected((prev) =>
-      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
-    );
+  function toggleIn(list: string[], key: string): string[] {
+    return list.includes(key) ? list.filter((k) => k !== key) : [...list, key];
   }
+  const toggleMonth = (key: string) => setSelected((prev) => toggleIn(prev, key));
+  const toggleTag = (key: string) => setSelectedTags((prev) => toggleIn(prev, key));
+
+  // Every tag that appears in the books, ordered by all-time spend so the
+  // common ones lead the checkbox list.
+  const allTags = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const e of entries) map.set(e.category, (map.get(e.category) ?? 0) + e.total);
+    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]).map(([k]) => k);
+  }, [entries]);
 
   const filtered = useMemo(() => {
-    if (isAllTime) return entries;
-    const set = new Set(selected);
-    return entries.filter((e) => set.has(toMonthKey(e.date)));
-  }, [entries, selected, isAllTime]);
+    const months = new Set(selected);
+    const tags = new Set(selectedTags);
+    return entries.filter(
+      (e) =>
+        (months.size === 0 || months.has(toMonthKey(e.date))) &&
+        (tags.size === 0 || tags.has(e.category)),
+    );
+  }, [entries, selected, selectedTags]);
 
   const periodLabel = isAllTime
     ? "All time"
+    : selected.length === 1
+      ? monthLabel(selected[0])
+      : `${selected.length} months`;
+  const tagLabel = selectedTags.length === 0 ? "all tags" : `${selectedTags.length} tag${selectedTags.length === 1 ? "" : "s"}`;
+  const hasFilters = selected.length > 0 || selectedTags.length > 0;
+  // Phrase for prose (keeps month names properly cased, unlike a blanket
+  // lowercase): "all time" / "May 2026" / "2 months".
+  const periodPhrase = isAllTime
+    ? "all time"
     : selected.length === 1
       ? monthLabel(selected[0])
       : `${selected.length} months`;
@@ -128,7 +189,7 @@ export default function AnalyticsPage() {
         out.push({
           tone: "warn",
           title: `${top.label} dominates spending`,
-          detail: `${top.label} is ${Math.round(pct)}% of spend (${peso(top.total)}) in ${periodLabel.toLowerCase()}. Worth a closer look for savings or a separate budget line.`,
+          detail: `${top.label} is ${Math.round(pct)}% of spend (${peso(top.total)}) in ${periodPhrase}. Worth a closer look for savings or a separate budget line.`,
         });
       } else {
         out.push({
@@ -204,7 +265,7 @@ export default function AnalyticsPage() {
     }
 
     return out.slice(0, 5);
-  }, [filtered, byCategory, total, pcfTotal, trend, periodLabel]);
+  }, [filtered, byCategory, total, pcfTotal, trend, periodPhrase]);
 
   return (
     <div className="pb-4">
@@ -217,53 +278,61 @@ export default function AnalyticsPage() {
           <TrendingUp className="w-5 h-5 text-leaf-600" />
           <h1 className="text-lg font-medium text-ink-900">Analytics</h1>
         </div>
-        <p className="text-xs text-ink-500 mt-0.5">Breakdowns and recommendations · {periodLabel}</p>
+        <p className="text-xs text-ink-500 mt-0.5">
+          Breakdowns and recommendations · {periodLabel} · {tagLabel}
+        </p>
       </div>
 
-      {/* Filter: all-time + multi-month */}
-      <div className="px-5 pt-3">
-        <p className="text-[11px] text-ink-500 mb-1.5">Filter by period</p>
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          <button
-            onClick={() => setSelected([])}
-            className={
-              "px-3 h-8 rounded-full text-xs font-medium whitespace-nowrap transition-colors " +
-              (isAllTime ? "bg-leaf-500 text-white" : "bg-sand-100 text-ink-700 hover:bg-sand-200")
-            }
-          >
-            All time
-          </button>
-          {availableMonths.map((key) => {
-            const active = selected.includes(key);
-            const parts = monthLabel(key).split(" ");
-            return (
-              <button
-                key={key}
-                onClick={() => toggleMonth(key)}
-                aria-pressed={active}
-                className={
-                  "px-3 h-8 rounded-full text-xs font-medium whitespace-nowrap transition-colors " +
-                  (active ? "bg-leaf-500 text-white" : "bg-sand-100 text-ink-700 hover:bg-sand-200")
-                }
-              >
-                {`${parts[0]} '${parts[1].slice(2)}`}
-              </button>
-            );
-          })}
-        </div>
-        {selected.length > 1 && (
-          <p className="text-[11px] text-ink-500 mt-1">
-            Combining {selected.length} months ·{" "}
-            <button onClick={() => setSelected([])} className="text-leaf-600 underline">
-              clear
+      {/* Filters: checkboxes for period (all-time + months) and tags. Both
+          combine — months AND tags. Empty group = no restriction. */}
+      <div className="px-5 pt-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-medium text-ink-900">Filters</p>
+          {hasFilters && (
+            <button
+              onClick={() => {
+                setSelected([]);
+                setSelectedTags([]);
+              }}
+              className="text-[11px] text-leaf-600 hover:underline"
+            >
+              Clear all
             </button>
-          </p>
-        )}
+          )}
+        </div>
+
+        <div>
+          <p className="text-[11px] text-ink-500 mb-1.5">Period</p>
+          <div className="flex flex-wrap gap-1.5">
+            <CheckPill checked={isAllTime} onClick={() => setSelected([])}>
+              All time
+            </CheckPill>
+            {availableMonths.map((key) => {
+              const parts = monthLabel(key).split(" ");
+              return (
+                <CheckPill key={key} checked={selected.includes(key)} onClick={() => toggleMonth(key)}>
+                  {`${parts[0]} '${parts[1].slice(2)}`}
+                </CheckPill>
+              );
+            })}
+          </div>
+        </div>
+
+        <div>
+          <p className="text-[11px] text-ink-500 mb-1.5">Tags</p>
+          <div className="flex flex-wrap gap-1.5">
+            {allTags.map((tag) => (
+              <CheckPill key={tag} checked={selectedTags.includes(tag)} onClick={() => toggleTag(tag)}>
+                {tag}
+              </CheckPill>
+            ))}
+          </div>
+        </div>
       </div>
 
       {total <= 0 ? (
         <div className="px-5 pt-8 text-center text-sm text-ink-500">
-          No expenses in {periodLabel.toLowerCase()}.
+          {hasFilters ? "No expenses match these filters." : "No expenses recorded yet."}
         </div>
       ) : (
         <>
@@ -311,7 +380,14 @@ export default function AnalyticsPage() {
 
           {/* Expenses by tag — full breakdown, pie default */}
           <div className="px-5 pt-5">
-            <ExpenseByTagChart title="Expenses by tag" data={byCategory} maxSlices={9} />
+            <ExpenseByTagChart
+              title="Expenses by tag"
+              data={byCategory}
+              maxSlices={9}
+              tagHref={(label) =>
+                `/entries?category=${encodeURIComponent(label)}${selected.length === 1 ? `&month=${selected[0]}` : ""}`
+              }
+            />
           </div>
 
           {/* Payment source split */}
@@ -374,7 +450,7 @@ export default function AnalyticsPage() {
                   </div>
                 ))}
               </div>
-              <p className="text-[11px] text-ink-300 mt-1">Most recent {trend.length} months · tap a chip above to highlight</p>
+              <p className="text-[11px] text-ink-300 mt-1">Most recent {trend.length} months · check a month above to highlight</p>
             </div>
           )}
         </>
