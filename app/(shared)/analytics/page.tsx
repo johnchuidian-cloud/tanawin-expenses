@@ -392,7 +392,7 @@ export default function AnalyticsPage() {
               data={byCategory}
               maxSlices={9}
               tagHref={(label) =>
-                `/entries?category=${encodeURIComponent(label)}${selected.length === 1 ? `&month=${selected[0]}` : ""}`
+                `/entries?category=${encodeURIComponent(label)}${selected.length === 1 ? `&month=${selected[0]}` : ""}&from=analytics`
               }
             />
           </div>

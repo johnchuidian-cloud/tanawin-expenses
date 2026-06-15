@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertCircle, ArrowUp, Plus, Search, X } from "lucide-react";
+import { AlertCircle, ArrowUp, ChevronLeft, Plus, Search, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { getEntries, getPcfLedger, getUserById } from "@/lib/store";
@@ -36,6 +36,7 @@ export default function EntriesPage() {
   const categoryFilter = searchParams.get("category");
   const staffIdFilter = searchParams.get("staffId");
   const monthParam = searchParams.get("month"); // YYYY-MM, carried from dashboard chips
+  const fromAnalytics = searchParams.get("from") === "analytics"; // drilled in from /analytics
   const staffFilterUser = staffIdFilter ? getUserById(staffIdFilter) : null;
 
   const [filter, setFilter] = useState<Filter>("all");
@@ -156,6 +157,14 @@ export default function EntriesPage() {
     <div className="pb-4">
       {/* Header + search */}
       <div className="px-5 pt-4 pb-3 border-b border-sand-200">
+        {fromAnalytics && (
+          <Link
+            href="/analytics"
+            className="inline-flex items-center gap-1 text-[11px] text-leaf-600 mb-2 hover:underline"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" /> Back to analytics
+          </Link>
+        )}
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-base font-medium text-ink-900">Entries</h1>
           <div className="flex items-center gap-2">
