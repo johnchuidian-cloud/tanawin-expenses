@@ -9,6 +9,7 @@ import { clearPcfBalance, getEntries, getPcfBalance, getPcfLedger, getUserById }
 import { peso, pesoShort, relativeDate, formatDate, toIsoDate, toMonthKey, entryInMonth, monthLabel } from "@/lib/format";
 import ExportButton from "@/components/ExportButton";
 import ReceiptsPackButton from "@/components/ReceiptsPackButton";
+import ExpenseByTagChart from "@/components/ExpenseByTagChart";
 import { paidFromBadgeClasses, paidFromLabel, paidFromRowClasses } from "@/lib/payment-meta";
 import { MonthGrid, type MonthScope } from "@/components/MonthGrid";
 
@@ -127,16 +128,15 @@ export default function AdminDashboardPage() {
       .sort((a, b) => b.total - a.total);
   }, [scopedEntries]);
 
-  // Top categories in the selected scope.
-  const categoryTotals = useMemo(() => {
+  // Expenses by tag in the selected scope — full breakdown (the chart rolls
+  // the long tail into an "Other" slice itself).
+  const categoryData = useMemo(() => {
     const map = new Map<string, number>();
     for (const e of scopedEntries) {
       map.set(e.category, (map.get(e.category) ?? 0) + e.total);
     }
-    return Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 4);
+    return Array.from(map.entries()).map(([label, total]) => ({ label, total }));
   }, [scopedEntries]);
-  const totalForCategoryView = categoryTotals.reduce((s, [, v]) => s + v, 0);
-  const maxCategoryTotal = categoryTotals[0]?.[1] ?? 1;
 
   const lastApprovedTopUp = ledger.find((p) => p.kind === "top-up" && p.status === "approved");
 
@@ -317,32 +317,15 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* Top categories */}
-      {categoryTotals.length > 0 && (
+      {/* Expenses by tag — pie by default, toggle to bar. Tapping the chart
+          drills through to the full analytics page. */}
+      {categoryData.length > 0 && (
         <div className="px-5 pt-5">
-          <div className="flex items-baseline justify-between mb-2">
-            <p className="text-sm font-medium text-ink-900">Top categories — {scopeShort}</p>
-            <Link href="/categories" className="text-[11px] text-ink-500">All ↗</Link>
-          </div>
-          <div className="space-y-2">
-            {categoryTotals.map(([cat, total]) => (
-              <Link
-                key={cat}
-                href={`/entries?category=${encodeURIComponent(cat)}`}
-                className="block hover:bg-sand-50 rounded-md -mx-1 px-1 py-1 transition-colors"
-              >
-                <div className="flex justify-between text-xs mb-1">
-                  <span className="text-ink-900">{cat}</span>
-                  <span className="text-ink-500">
-                    {peso(total)} · {totalForCategoryView > 0 ? Math.round((total / totalForCategoryView) * 100) : 0}%
-                  </span>
-                </div>
-                <div className="h-1.5 bg-sand-100 rounded-full overflow-hidden">
-                  <div className="h-full bg-leaf-300" style={{ width: `${(total / maxCategoryTotal) * 100}%` }} />
-                </div>
-              </Link>
-            ))}
-          </div>
+          <ExpenseByTagChart
+            title={`Expenses by tag — ${scopeShort}`}
+            data={categoryData}
+            href="/analytics"
+          />
         </div>
       )}
 
@@ -350,7 +333,7 @@ export default function AdminDashboardPage() {
           shows October..February instead of always January..May. */}
       <div className="px-5 pt-5">
         <p className="text-sm font-medium text-ink-900 mb-2">Month on month</p>
-        <div className="flex items-end gap-2 h-28">
+        <div className="flex gap-2 h-28">
           {momData.map((m) => (
             <div key={m.key} className="flex-1 flex flex-col items-center gap-1">
               <div className="w-full flex-1 flex items-end">
