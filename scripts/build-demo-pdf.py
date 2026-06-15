@@ -21,7 +21,8 @@ W, H = letter  # 612 x 792
 
 PAGES = [
     ("01-login.png", "Sign in", "Pick your name — no usernames to remember. Admin, staff, and a view-only Guest for accountants and family."),
-    ("02-dashboard.png", "Owner dashboard", "Petty-cash balance, what needs review, spend by staff and category, month-on-month — at a glance."),
+    ("02-dashboard.png", "Owner dashboard", "Petty-cash balance, what needs review, a one-tap expense log, and spend by tag as a pie or bar chart."),
+    ("11-analytics.png", "Analytics & insights", "Tap a chart to drill in. Filter by month(s) and tag with checkboxes; see spend by staff and funding source, trends, and plain-language recommendations."),
     ("03-entries.png", "Expense ledger", "Every expense and top-up, colour-coded by funding source (petty cash vs. other), searchable and filterable by month."),
     ("04-entry-detail.png", "Entry & receipt", "Each line item links to its receipt photo, edit history, and an internal note thread."),
     ("05-review.png", "Review queue", "Duplicates, arithmetic slips, and unusual amounts are flagged automatically; top-ups await the owner's approval."),
