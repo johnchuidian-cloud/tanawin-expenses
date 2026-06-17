@@ -143,7 +143,7 @@ export default function StaffLogTopUpPage() {
             value={note}
             onChange={(e) => setNote(e.target.value)}
             rows={3}
-            placeholder="e.g. From Ate Lexi via BPI transfer · ref 8847291"
+            placeholder="e.g. From Ma'am Lexi via PNB transfer · ref 8847291"
             className="w-full px-3 py-2 rounded-lg border border-sand-200 bg-white text-base text-ink-900 placeholder:text-ink-300 focus:outline-none focus:ring-2 focus:ring-leaf-300 focus:border-leaf-300 resize-none"
           />
         </div>

@@ -37,6 +37,7 @@ import {
   getUserById,
   isEntryMediaLoaded,
   isReceiptPhotoLoaded,
+  resolveFlag,
   setEntryPhotos,
 } from "@/lib/store";
 import { formatDate, formatDateTime, peso } from "@/lib/format";
@@ -171,6 +172,9 @@ export default function StaffEntryDetailPage() {
   const resolvedFlags = entry.flags.filter((f) => f.resolved);
   // Admins can edit any entry; staff can edit the ones they logged.
   const canEdit = me?.role === "admin" || me?.id === entry.loggedBy;
+  // Admins can clear/push-back flags right here (same actions as the review
+  // queue), so they don't have to bounce back to /review.
+  const canReview = me?.role === "admin" && openFlags.length > 0;
   // View-only guests see everything except internal notes, and get no
   // write affordances (photos, items, replies).
   const isGuest = me?.role === "guest";
@@ -206,6 +210,34 @@ export default function StaffEntryDetailPage() {
       return;
     }
     addNoteToEntry(entry.id, { authorId: myId, body: trimmed, kind: "comment" });
+    setReply("");
+    setError(null);
+  }
+
+  // Review actions — mirror the /review queue card. "Mark OK" clears all open
+  // flags (note optional); "Do not approve" records a pushback note and leaves
+  // the flag open so the entry stays in the queue. Both use the note box below.
+  function handleMarkOk() {
+    if (!myId || !entry) return;
+    const trimmed = reply.trim();
+    if (trimmed.length > 0) {
+      addNoteToEntry(entry.id, { authorId: myId, body: trimmed, kind: "comment" });
+    }
+    for (const flag of openFlags) {
+      resolveFlag(entry.id, flag.kind, myId);
+    }
+    setReply("");
+    setError(null);
+  }
+
+  function handleDoNotApprove() {
+    if (!myId || !entry) return;
+    const trimmed = reply.trim();
+    if (trimmed.length === 0) {
+      setError("Add a note explaining why before you push back.");
+      return;
+    }
+    addNoteToEntry(entry.id, { authorId: myId, body: trimmed, kind: "pushback" });
     setReply("");
     setError(null);
   }
@@ -613,7 +645,8 @@ export default function StaffEntryDetailPage() {
       {/* Reply */}
       <div className="px-5 pt-4">
         <label htmlFor="reply" className="text-[11px] text-ink-500 flex items-center gap-1">
-          <MessageSquare className="w-3 h-3" /> Add a note
+          <MessageSquare className="w-3 h-3" />{" "}
+          {canReview ? "Add a note (optional to mark OK, required to not approve)" : "Add a note"}
         </label>
         <textarea
           id="reply"
@@ -627,9 +660,36 @@ export default function StaffEntryDetailPage() {
           className="w-full mt-1 px-3 py-2 rounded-lg border border-sand-200 bg-white text-sm text-ink-900 placeholder:text-ink-300 focus:outline-none focus:ring-2 focus:ring-leaf-300 focus:border-leaf-300 resize-none"
         />
         {error && <p className="text-xs text-clay-500 mt-1">{error}</p>}
+
+        {/* Review actions — shown for admins when the entry still has open
+            flags, so Lexi can clear or push back without returning to /review. */}
+        {canReview && (
+          <div className="flex gap-2 mt-2">
+            <button
+              onClick={handleMarkOk}
+              className="btn btn-sm flex-1 bg-leaf-500 text-white border-leaf-500"
+              aria-label="Mark all flags on this entry as resolved"
+            >
+              <Check className="w-3.5 h-3.5" /> Mark OK
+            </button>
+            <button
+              onClick={handleDoNotApprove}
+              className="btn btn-sm flex-1 bg-white border-clay-200 text-clay-500"
+              aria-label="Push back on this entry with a note"
+            >
+              <X className="w-3.5 h-3.5" /> Do not approve
+            </button>
+          </div>
+        )}
+
         <button
           onClick={handleSendReply}
-          className="btn btn-sm w-full mt-2 bg-leaf-500 text-white border-leaf-500"
+          className={
+            "btn btn-sm w-full mt-2 " +
+            (canReview
+              ? "bg-white border-sand-200 text-ink-700"
+              : "bg-leaf-500 text-white border-leaf-500")
+          }
         >
           <Send className="w-3.5 h-3.5" /> Send note
         </button>

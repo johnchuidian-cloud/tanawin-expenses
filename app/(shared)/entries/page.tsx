@@ -367,9 +367,14 @@ export default function EntriesPage() {
                           )}
                         </p>
                       </div>
-                      <p className="text-sm font-medium text-ink-900 ml-3">
-                        {peso(entry.total)}
-                      </p>
+                      <div className="ml-3 text-right flex-shrink-0">
+                        <p className="text-sm font-medium text-ink-900">
+                          {peso(entry.total)}
+                        </p>
+                        <p className="text-[10px] text-ink-500 mt-0.5">
+                          {entry.qty} × {peso(entry.unitPrice, { cents: true })}
+                        </p>
+                      </div>
                     </Link>
                   );
                 })}
