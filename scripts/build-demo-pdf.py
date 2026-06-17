@@ -24,6 +24,7 @@ PAGES = [
     ("02-dashboard.png", "Owner dashboard", "Petty-cash balance, what needs review, a one-tap expense log, and spend by tag as a pie or bar chart."),
     ("11-analytics.png", "Analytics & insights", "Tap a chart to drill in. Filter by month(s) and tag with checkboxes; see spend by staff and funding source, trends, and plain-language recommendations."),
     ("03-entries.png", "Expense ledger", "Every expense and top-up, colour-coded by funding source (petty cash vs. other), searchable and filterable by month."),
+    ("13-excel-export.png", "Excel export", "Export to Excel by month, several months, or a whole year. The workbook lands clean: sorted by date, money formatted, internal IDs dropped."),
     ("04-entry-detail.png", "Entry & receipt", "Each line item links to its receipt photo, edit history, and an internal note thread."),
     ("05-review.png", "Review queue", "Duplicates, arithmetic slips, and unusual amounts are flagged automatically; top-ups await the owner's approval."),
     ("10-pcf.png", "Petty cash", "Top-ups are reported by staff and approved or rejected with a reason; every expense draws the balance down."),
