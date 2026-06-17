@@ -39,3 +39,4 @@ trigger
 2026-06-15d — Excel export on the entries page for all roles (guests + staff included)
 2026-06-15e — "Back to analytics" button on tag-filtered entries (from=analytics)
 2026-06-15f — entry-page review actions (Mark OK / Do not approve), qty×price in list, Ma'am Lexi / PNB; Excel date-range picker + organized sheets
+2026-06-15g — bulk-correct entries from the ledger (admin select mode: move month / set category / set funding source)
