@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertCircle, ArrowUp, ChevronLeft, Plus, Search, X } from "lucide-react";
+import { AlertCircle, ArrowUp, Check, ChevronLeft, ListChecks, Plus, Search, Wand2, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { getEntries, getPcfLedger, getUserById } from "@/lib/store";
@@ -13,6 +13,7 @@ import { paidFromBadgeClasses, paidFromLabel, paidFromRowClasses } from "@/lib/p
 import { MonthChips, type MonthScope } from "@/components/MonthChips";
 import ExpenseByTagChart from "@/components/ExpenseByTagChart";
 import ExportButton from "@/components/ExportButton";
+import BulkCorrectModal from "@/components/BulkCorrectModal";
 import type { Entry, PcfLedgerEntry } from "@/lib/types";
 
 type Filter = "all" | "mine" | "flagged" | "topups";
@@ -42,6 +43,28 @@ export default function EntriesPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [monthScope, setMonthScope] = useState<MonthScope>(monthParam ?? "all");
   const [query, setQuery] = useState("");
+
+  // Bulk-correction (admin): pick several entries and fix a field across all of
+  // them at once — see components/BulkCorrectModal.tsx.
+  const isAdmin = me?.role === "admin";
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [correcting, setCorrecting] = useState(false);
+  const [correctedMsg, setCorrectedMsg] = useState<string | null>(null);
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+  function exitSelect() {
+    setSelectMode(false);
+    setSelectedIds([]);
+  }
+  function handleApplied(n: number) {
+    setCorrecting(false);
+    exitSelect();
+    setCorrectedMsg(`Corrected ${n} entr${n === 1 ? "y" : "ies"}`);
+    setTimeout(() => setCorrectedMsg((cur) => (cur && cur.startsWith("Corrected") ? null : cur)), 4000);
+  }
 
   const allEntries = getEntries();
   const ledger = getPcfLedger();
@@ -168,13 +191,34 @@ export default function EntriesPage() {
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-base font-medium text-ink-900">Entries</h1>
           <div className="flex items-center gap-2">
-            {/* Excel export is available to every role — view-only guests
-                (accountants/family) often need the workbook most. */}
-            <ExportButton variant="sm" />
-            {me?.role !== "guest" && (
-              <Link href="/new" className="btn btn-sm bg-leaf-500 text-white border-leaf-500">
-                <Plus className="w-3.5 h-3.5" /> New
-              </Link>
+            {selectMode ? (
+              <button
+                onClick={exitSelect}
+                className="btn btn-sm bg-white border-sand-200 text-ink-700"
+              >
+                Cancel
+              </button>
+            ) : (
+              <>
+                {/* Admin-only bulk correction: select several entries, fix a
+                    field across all of them at once. */}
+                {isAdmin && (
+                  <button
+                    onClick={() => setSelectMode(true)}
+                    className="btn btn-sm bg-white border-sand-200 text-ink-700"
+                  >
+                    <ListChecks className="w-3.5 h-3.5" /> Select
+                  </button>
+                )}
+                {/* Excel export is available to every role — view-only guests
+                    (accountants/family) often need the workbook most. */}
+                <ExportButton variant="sm" />
+                {me?.role !== "guest" && (
+                  <Link href="/new" className="btn btn-sm bg-leaf-500 text-white border-leaf-500">
+                    <Plus className="w-3.5 h-3.5" /> New
+                  </Link>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -202,6 +246,36 @@ export default function EntriesPage() {
           />
         </div>
       </div>
+
+      {/* Selection action bar — sticky while picking entries to bulk-correct. */}
+      {selectMode && (
+        <div className="sticky top-0 z-20 px-5 py-2 bg-leaf-50 border-b border-leaf-200 flex items-center justify-between">
+          <p className="text-xs text-ink-700">
+            {selectedIds.length} selected
+            {selectedIds.length === 0 && <span className="text-ink-500"> · tap entries to pick</span>}
+          </p>
+          <div className="flex items-center gap-3">
+            {selectedIds.length > 0 && (
+              <button onClick={() => setSelectedIds([])} className="text-[11px] text-ink-500 hover:underline">
+                Clear
+              </button>
+            )}
+            <button
+              onClick={() => setCorrecting(true)}
+              disabled={selectedIds.length === 0}
+              className="btn btn-sm bg-leaf-500 text-white border-leaf-500 disabled:opacity-50"
+            >
+              <Wand2 className="w-3.5 h-3.5" /> Correct
+            </button>
+          </div>
+        </div>
+      )}
+
+      {correctedMsg && (
+        <div className="px-5 py-2 bg-leaf-50 border-b border-leaf-100 text-xs text-leaf-600 flex items-center gap-1.5">
+          <Check className="w-3.5 h-3.5" /> {correctedMsg} · other devices need a refresh to see this.
+        </div>
+      )}
 
       {/* Filter chips */}
       <div className="px-5 pt-3 flex gap-2 overflow-x-auto">
@@ -339,15 +413,9 @@ export default function EntriesPage() {
                   const logger = getUserById(entry.loggedBy);
                   const hasOpenFlag = entry.flags.some((f) => !f.resolved);
                   const hasNote = entry.notes.length > 0;
-                  return (
-                    <Link
-                      key={entry.id}
-                      href={`/entries/${entry.id}`}
-                      className={
-                        "flex items-center justify-between p-2.5 rounded-lg border transition-colors " +
-                        paidFromRowClasses(entry.paidFrom)
-                      }
-                    >
+                  const selected = selectedIds.includes(entry.id);
+                  const inner = (
+                    <>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-ink-900 truncate">
                           {hasOpenFlag && (
@@ -375,6 +443,46 @@ export default function EntriesPage() {
                           {entry.qty} × {peso(entry.unitPrice, { cents: true })}
                         </p>
                       </div>
+                    </>
+                  );
+
+                  // In select mode the row toggles selection instead of opening.
+                  if (selectMode) {
+                    return (
+                      <button
+                        key={entry.id}
+                        type="button"
+                        onClick={() => toggleSelect(entry.id)}
+                        aria-pressed={selected}
+                        className={
+                          "w-full text-left flex items-center gap-2 p-2.5 rounded-lg border transition-colors " +
+                          paidFromRowClasses(entry.paidFrom) +
+                          (selected ? " ring-2 ring-leaf-400" : "")
+                        }
+                      >
+                        <span
+                          className={
+                            "w-5 h-5 rounded flex items-center justify-center flex-shrink-0 border " +
+                            (selected ? "bg-leaf-500 border-leaf-500 text-white" : "border-sand-300 text-transparent bg-white")
+                          }
+                        >
+                          <Check className="w-3.5 h-3.5" strokeWidth={3} />
+                        </span>
+                        {inner}
+                      </button>
+                    );
+                  }
+
+                  return (
+                    <Link
+                      key={entry.id}
+                      href={`/entries/${entry.id}`}
+                      className={
+                        "flex items-center justify-between p-2.5 rounded-lg border transition-colors " +
+                        paidFromRowClasses(entry.paidFrom)
+                      }
+                    >
+                      {inner}
                     </Link>
                   );
                 })}
@@ -383,6 +491,14 @@ export default function EntriesPage() {
           );
         })}
       </div>
+
+      {correcting && (
+        <BulkCorrectModal
+          entries={allEntries.filter((e) => selectedIds.includes(e.id))}
+          onClose={() => setCorrecting(false)}
+          onApplied={handleApplied}
+        />
+      )}
     </div>
   );
 }
