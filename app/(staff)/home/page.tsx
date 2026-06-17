@@ -10,6 +10,7 @@ import { peso, pesoShort, relativeDate, toMonthKey, entryInMonth, monthLabel } f
 import { staffCategoryLabel } from "@/lib/category-meta";
 import { MonthGrid, type MonthScope } from "@/components/MonthGrid";
 import ExpenseByTagChart from "@/components/ExpenseByTagChart";
+import ExportButton from "@/components/ExportButton";
 
 export default function StaffHomePage() {
   useStoreTick(); // re-render on store changes
@@ -131,8 +132,14 @@ export default function StaffHomePage() {
 
       {/* PCF balance card */}
       <div className="bg-leaf-50 px-5 py-4 border-b border-sand-200">
-        <p className="text-xs text-leaf-600">Pooled petty cash balance</p>
-        <p className="text-3xl font-medium text-leaf-600 mt-1">{peso(balance)}</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs text-leaf-600">Pooled petty cash balance</p>
+            <p className="text-3xl font-medium text-leaf-600 mt-1">{peso(balance)}</p>
+          </div>
+          {/* Excel export is for everyone (admin/staff/guest), not just Lexi. */}
+          <ExportButton variant="sm" />
+        </div>
         <div className="flex items-center justify-between mt-2">
           <p className="text-xs text-leaf-600">
             {lastApprovedTopUp
