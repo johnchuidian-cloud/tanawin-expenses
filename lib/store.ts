@@ -946,6 +946,30 @@ function squashVendor(s: string): string {
   return normalizeVendor(s).replace(/\s+/g, "");
 }
 
+/** Levenshtein edit distance (single-char insert/delete/substitute steps). */
+function editDistance(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  if (m === 0) return n;
+  if (n === 0) return m;
+  let prev = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+/** Similarity 0..1 between two strings (1 = identical), by edit distance. */
+function vendorSimilarity(a: string, b: string): number {
+  if (!a || !b) return 0;
+  return 1 - editDistance(a, b) / Math.max(a.length, b.length);
+}
+
 function parseVendorRegistry(raw: unknown): VendorRegistry {
   const empty: VendorRegistry = { v: 1, vendors: [], suggestions: [] };
   if (typeof raw !== "string" || raw.trim() === "") return empty;
@@ -1016,10 +1040,20 @@ export function getVendorAutocomplete(): string[] {
   return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
 }
 
+/** Min length + similarity for the fuzzy typo fallback (conservative). */
+const VENDOR_FUZZY_MIN_LEN = 4;
+const VENDOR_FUZZY_THRESHOLD = 0.85;
+
 /**
  * If the typed vendor looks like a known variant, return the canonical name to
  * suggest ("Did you mean…?"). Returns null when it already matches a canonical
  * name exactly, or nothing close is found. Suggest-only — never auto-applies.
+ *
+ * Order: exact spacing/alias match first (high confidence), then a conservative
+ * fuzzy fallback (edit distance) that catches typos like "Puregld" → "Puregold"
+ * and "Beeperas" → "Beperas Water Treatment Services" (matched on the first
+ * word). Abbreviations like "BWTS" are deliberately NOT auto-detected — admins
+ * save those as aliases instead.
  */
 export function suggestCanonicalVendor(input: string): string | null {
   const norm = normalizeVendor(input);
@@ -1032,7 +1066,27 @@ export function suggestCanonicalVendor(input: string): string | null {
     if (squashed && squashed === squashVendor(v.name)) return v.name; // spacing-only diff
     if (v.aliases.some((a) => squashVendor(a) === squashed)) return v.name;
   }
-  return null;
+
+  // Fuzzy fallback — only for inputs of a few characters, and only the single
+  // best high-similarity vendor. Compared against the full name, its first
+  // word, and any aliases.
+  if (squashed.length < VENDOR_FUZZY_MIN_LEN) return null;
+  let best: { name: string; score: number } | null = null;
+  for (const v of vendorRegistry.vendors) {
+    const candidates = [
+      squashVendor(v.name),
+      squashVendor(normalizeVendor(v.name).split(" ")[0]),
+      ...v.aliases.map((a) => squashVendor(a)),
+    ].filter((c) => c.length >= VENDOR_FUZZY_MIN_LEN);
+    let bestForVendor = 0;
+    for (const c of candidates) {
+      bestForVendor = Math.max(bestForVendor, vendorSimilarity(squashed, c));
+    }
+    if (bestForVendor >= VENDOR_FUZZY_THRESHOLD && (!best || bestForVendor > best.score)) {
+      best = { name: v.name, score: bestForVendor };
+    }
+  }
+  return best?.name ?? null;
 }
 
 /** Add or update a canonical vendor (admin). Merges aliases if it exists. */
