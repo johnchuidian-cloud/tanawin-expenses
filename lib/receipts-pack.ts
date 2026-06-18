@@ -20,8 +20,16 @@ import { reconciliationStatus } from "./validation";
 import { toMonthKey, monthLabel } from "./format";
 import type { Entry, Receipt } from "./types";
 
-/** "all" = every receipt ever; otherwise a YYYY-MM month key. */
-export type PackScope = "all" | string;
+/**
+ * Which receipts to pack. `months` is a list of YYYY-MM keys (one month, a
+ * handful, or a whole year's worth); undefined/empty means every receipt ever.
+ * `label` is the filename suffix. Mirrors ExportRange in lib/export.ts so the
+ * shared RangePicker drives both downloads identically.
+ */
+export interface PackRange {
+  months?: string[];
+  label?: string;
+}
 
 interface PackResult {
   blob: Blob;
@@ -69,44 +77,65 @@ function csvRow(fields: Array<string | number>): string {
   return fields.map(csvField).join(",");
 }
 
-/** Receipts whose date falls in the scope, newest first. */
-function receiptsInScope(scope: PackScope): Receipt[] {
-  const all = [...getReceipts()].sort((a, b) =>
-    a.date < b.date ? 1 : a.date > b.date ? -1 : 0,
-  );
-  if (scope === "all") return all;
-  return all.filter((r) => toMonthKey(r.date) === scope);
+/** True when a date's month is in the selection (empty selection = all). */
+function inMonths(dateIso: string, months?: string[]): boolean {
+  if (!months || months.length === 0) return true;
+  return months.includes(toMonthKey(dateIso));
+}
+
+/** Receipts whose date falls in the selection, newest first. */
+function receiptsInScope(months?: string[]): Receipt[] {
+  return [...getReceipts()]
+    .filter((r) => inMonths(r.date, months))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
 }
 
 /** Standalone entries (not tied to a receipt) that carry their own photos. */
-function standalonePhotoEntries(scope: PackScope): Entry[] {
+function standalonePhotoEntries(months?: string[]): Entry[] {
   return getEntries()
     .filter((e) => !e.receiptId && (e.photoUrls?.length ?? 0) > 0)
-    .filter((e) => scope === "all" || toMonthKey(e.date) === scope)
+    .filter((e) => inMonths(e.date, months))
     .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+}
+
+/** Load the lazily-fetched photos for a month selection (or all). */
+function loadMediaForRange(months?: string[]): Promise<boolean> {
+  if (!months || months.length === 0) return loadAllMedia("all");
+  return Promise.all(months.map((m) => loadAllMedia(m))).then((rs) => rs.every(Boolean));
+}
+
+/** How many receipts (+ standalone photo entries) a selection covers. */
+export function countReceiptsInRange(months?: string[]): number {
+  return receiptsInScope(months).length + standalonePhotoEntries(months).length;
 }
 
 /**
  * Build the receipts pack for a scope. Returns the zip blob plus counts, or
  * null if there's nothing to pack (caller shows an empty-state message).
  */
-export async function buildReceiptsPack(scope: PackScope): Promise<PackResult | null> {
-  // Photos aren't downloaded at app start — pull them for this scope first.
+export async function buildReceiptsPack(range: PackRange): Promise<PackResult | null> {
+  const months = range.months;
+  // Photos aren't downloaded at app start — pull them for this selection first.
   // This must happen before standalonePhotoEntries(), which detects loose
   // photos by looking at the (lazily loaded) entry media.
-  const mediaOk = await loadAllMedia(scope);
+  const mediaOk = await loadMediaForRange(months);
   if (!mediaOk) {
     throw new Error("Couldn't download the receipt photos. Check your connection and try again.");
   }
 
-  const receipts = receiptsInScope(scope);
-  const loose = standalonePhotoEntries(scope);
+  const receipts = receiptsInScope(months);
+  const loose = standalonePhotoEntries(months);
   if (receipts.length === 0 && loose.length === 0) return null;
 
   const allEntries = getEntries();
   const zip = new JSZip();
   const folder = zip.folder("receipts")!;
   const usedNames = new Set<string>();
+  // Pack-wide content dedup: the same photo can be attached to several entries,
+  // shared across receipts, or duplicated in an entry's photo list. We write
+  // each unique image ONCE and hand back its filename so every receipt/entry
+  // that uses it just references the same file — no duplicate copies in the zip.
+  const fileByContent = new Map<string, string>();
 
   // CSV header mirrors the Excel "Receipts" sheet, plus a photo-files column.
   const csv: string[] = [
@@ -129,7 +158,11 @@ export async function buildReceiptsPack(scope: PackScope): Promise<PackResult | 
   let photoCount = 0;
 
   // Add an image to the zip under a unique, readable name; returns the name.
+  // If this exact image content was already added (by any receipt/entry), the
+  // existing filename is returned and nothing new is written.
   function addImage(dataUrl: string, date: string, vendor: string, id: string, n: number): string | null {
+    const existing = fileByContent.get(dataUrl);
+    if (existing) return existing;
     const parts = dataUrlToParts(dataUrl);
     if (!parts) return null;
     const suffix = n > 0 ? `_${n + 1}` : "";
@@ -139,6 +172,7 @@ export async function buildReceiptsPack(scope: PackScope): Promise<PackResult | 
     while (usedNames.has(name)) name = `${base}-${dedupe++}.${parts.ext}`;
     usedNames.add(name);
     folder.file(name, parts.base64, { base64: true });
+    fileByContent.set(dataUrl, name);
     photoCount++;
     return name;
   }
@@ -156,7 +190,7 @@ export async function buildReceiptsPack(scope: PackScope): Promise<PackResult | 
       if (seen.has(url)) continue;
       seen.add(url);
       const name = addImage(url, r.date, r.vendor, r.id, files.length);
-      if (name) files.push(name);
+      if (name && !files.includes(name)) files.push(name);
     }
     csv.push(
       csvRow([
@@ -181,7 +215,7 @@ export async function buildReceiptsPack(scope: PackScope): Promise<PackResult | 
     const files: string[] = [];
     for (const url of (e.photoUrls ?? []).filter((u) => u.startsWith("data:"))) {
       const name = addImage(url, e.date, e.vendor, e.id, files.length);
-      if (name) files.push(name);
+      if (name && !files.includes(name)) files.push(name);
     }
     csv.push(
       csvRow([
@@ -201,7 +235,12 @@ export async function buildReceiptsPack(scope: PackScope): Promise<PackResult | 
     );
   }
 
-  const scopeLabel = scope === "all" ? "All time" : monthLabel(scope);
+  const scopeLabel =
+    !months || months.length === 0
+      ? "All time"
+      : months.length === 1
+        ? monthLabel(months[0])
+        : `${months.length} months`;
   zip.file("index.csv", csv.join("\r\n"));
   zip.file(
     "README.txt",
@@ -221,10 +260,9 @@ export async function buildReceiptsPack(scope: PackScope): Promise<PackResult | 
   );
 
   const blob = await zip.generateAsync({ type: "blob" });
-  const scopeSlug = scope === "all" ? "all-time" : scope;
   return {
     blob,
-    filename: `Tanawin-Receipts-${scopeSlug}.zip`,
+    filename: `Tanawin-Receipts-${range.label ?? "all-time"}.zip`,
     count: receipts.length + loose.length,
     photoCount,
   };
@@ -234,8 +272,8 @@ export async function buildReceiptsPack(scope: PackScope): Promise<PackResult | 
  * Build the pack and trigger a browser download. Returns the result (for a
  * confirmation message) or null if there was nothing to pack.
  */
-export async function downloadReceiptsPack(scope: PackScope): Promise<PackResult | null> {
-  const result = await buildReceiptsPack(scope);
+export async function downloadReceiptsPack(range: PackRange): Promise<PackResult | null> {
+  const result = await buildReceiptsPack(range);
   if (!result) return null;
 
   const url = URL.createObjectURL(result.blob);

@@ -13,6 +13,7 @@ import { paidFromBadgeClasses, paidFromLabel, paidFromRowClasses } from "@/lib/p
 import { MonthChips, type MonthScope } from "@/components/MonthChips";
 import ExpenseByTagChart from "@/components/ExpenseByTagChart";
 import ExportButton from "@/components/ExportButton";
+import ReceiptsPackButton from "@/components/ReceiptsPackButton";
 import BulkCorrectModal from "@/components/BulkCorrectModal";
 import type { Entry, PcfLedgerEntry } from "@/lib/types";
 
@@ -210,9 +211,10 @@ export default function EntriesPage() {
                     <ListChecks className="w-3.5 h-3.5" /> Select
                   </button>
                 )}
-                {/* Excel export is available to every role — view-only guests
-                    (accountants/family) often need the workbook most. */}
+                {/* Excel + receipts pack are available to every role — view-only
+                    guests (accountants/family) often need them most. */}
                 <ExportButton variant="sm" />
+                <ReceiptsPackButton variant="sm" />
                 {me?.role !== "guest" && (
                   <Link href="/new" className="btn btn-sm bg-leaf-500 text-white border-leaf-500">
                     <Plus className="w-3.5 h-3.5" /> New
