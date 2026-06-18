@@ -41,3 +41,4 @@ trigger
 2026-06-15f — entry-page review actions (Mark OK / Do not approve), qty×price in list, Ma'am Lexi / PNB; Excel date-range picker + organized sheets
 2026-06-15g — bulk-correct entries from the ledger (admin select mode: move month / set category / set funding source)
 2026-06-15h — Excel download on staff home too (all roles can export from their main screen)
+2026-06-18a — receipts dedup + date-range picker (guests can download too), personal-purchase line items + receipt VAT, vendor registry (autocomplete / suggestions / approve / merge)
