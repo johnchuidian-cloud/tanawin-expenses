@@ -18,7 +18,7 @@
 "use client";
 
 import * as XLSX from "xlsx";
-import { getEntries, getPcfLedger, getReceipts, getUserById } from "./store";
+import { getEntries, getPcfLedger, getPersonalEntryIds, getReceipts, getUserById } from "./store";
 import { effectiveReconciliation } from "./validation";
 
 export interface ExportRange {
@@ -46,6 +46,7 @@ function byDateAsc<T extends { date: string }>(a: T, b: T): number {
 }
 
 function buildEntryRows(months?: string[]) {
+  const personal = getPersonalEntryIds();
   return getEntries()
     .filter((e) => inRange(e.date, months))
     .sort(byDateAsc)
@@ -59,6 +60,7 @@ function buildEntryRows(months?: string[]) {
       Category: e.category,
       "Paid From": e.paidFrom === "pcf" ? "PCF" : "Other fund",
       "Major Repair": e.majorRepair ? "Yes" : "",
+      Personal: personal.has(e.id) ? "Yes" : "",
       "Logged By": userName(e.loggedBy),
     }));
 }
@@ -97,6 +99,7 @@ function buildReceiptRows(months?: string[]) {
         Date: r.date,
         Vendor: r.vendor,
         "Receipt Total": r.totalTyped,
+        "VAT (incl.)": r.vatAmount ?? "",
         "Captured By": userName(r.capturedBy),
         "Line Items": linked.length,
         "Line Item Total": recon.sum,
@@ -136,7 +139,7 @@ export function downloadExcelExport(range?: ExportRange): string {
   const wb = XLSX.utils.book_new();
 
   const entriesSheet = XLSX.utils.json_to_sheet(buildEntryRows(months));
-  styleSheet(entriesSheet, [12, 18, 24, 6, 12, 12, 16, 11, 12, 13], [4, 5]);
+  styleSheet(entriesSheet, [12, 18, 24, 6, 12, 12, 16, 11, 12, 9, 13], [4, 5]);
   XLSX.utils.book_append_sheet(wb, entriesSheet, "Entries");
 
   const pcfSheet = XLSX.utils.json_to_sheet(buildPcfRows(months));
@@ -144,7 +147,7 @@ export function downloadExcelExport(range?: ExportRange): string {
   XLSX.utils.book_append_sheet(wb, pcfSheet, "PCF Ledger");
 
   const receiptsSheet = XLSX.utils.json_to_sheet(buildReceiptRows(months));
-  styleSheet(receiptsSheet, [12, 18, 13, 13, 10, 14, 20, 11], [2, 5, 7]);
+  styleSheet(receiptsSheet, [12, 18, 13, 13, 13, 10, 14, 20, 11], [2, 3, 6, 8]);
   XLSX.utils.book_append_sheet(wb, receiptsSheet, "Receipts");
 
   const label = range?.label ?? "all-time";

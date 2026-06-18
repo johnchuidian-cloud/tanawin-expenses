@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, ArrowUp, Check, ChevronLeft, ListChecks, Plus, Search, Wand2, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
-import { getEntries, getPcfLedger, getUserById } from "@/lib/store";
+import { getEntries, getPcfLedger, getPersonalEntryIds, getUserById } from "@/lib/store";
 import { entryInMonth, peso, relativeDate, toMonthKey } from "@/lib/format";
 import { staffCategoryLabel } from "@/lib/category-meta";
 import { paidFromBadgeClasses, paidFromLabel, paidFromRowClasses } from "@/lib/payment-meta";
@@ -135,6 +135,9 @@ export default function EntriesPage() {
     () => [...expenseRows, ...topUpRows].sort((a, b) => (a.date < b.date ? 1 : -1)),
     [expenseRows, topUpRows],
   );
+
+  // Personal line items (excluded from PCF) — badged in the list.
+  const personalIds = getPersonalEntryIds();
 
   // Totals for the filter-summary line.
   const expenseTotal = expenseRows.reduce((s, r) => s + (r.kind === "expense" ? r.entry.total : 0), 0);
@@ -413,6 +416,7 @@ export default function EntriesPage() {
                   }
                   const entry = row.entry;
                   const logger = getUserById(entry.loggedBy);
+                  const personal = personalIds.has(entry.id);
                   const hasOpenFlag = entry.flags.some((f) => !f.resolved);
                   const hasNote = entry.notes.length > 0;
                   const selected = selectedIds.includes(entry.id);
@@ -426,9 +430,15 @@ export default function EntriesPage() {
                           {entry.vendor} · {entry.item}
                         </p>
                         <p className="text-[11px] text-ink-500 mt-0.5">
-                          <span className={"badge mr-1 " + paidFromBadgeClasses(entry.paidFrom)}>
-                            {paidFromLabel(entry.paidFrom)}
-                          </span>
+                          {personal ? (
+                            <span className="badge mr-1 bg-amber-100 text-amber-800">
+                              Personal
+                            </span>
+                          ) : (
+                            <span className={"badge mr-1 " + paidFromBadgeClasses(entry.paidFrom)}>
+                              {paidFromLabel(entry.paidFrom)}
+                            </span>
+                          )}
                           {staffCategoryLabel(entry.category)} · {logger?.name ?? "—"}
                           {hasNote && (
                             <span className="ml-1.5 text-ink-700">

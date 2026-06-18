@@ -18,6 +18,7 @@ import {
   RotateCcw,
   Scissors,
   Trash2,
+  Wallet,
 } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
@@ -29,9 +30,12 @@ import {
   getReceiptById,
   getReceipts,
   getUserById,
+  isEntryPersonal,
   isReceiptPhotoLoaded,
   markReceiptSettled,
   mergeReceipts,
+  setEntryPersonal,
+  setReceiptVat,
   splitEntryFromReceipt,
   unmarkReceiptSettled,
 } from "@/lib/store";
@@ -150,6 +154,33 @@ export default function AdminGalleryDetailPage() {
     if (!res.ok) setToolError(res.reason ?? "Couldn't undo.");
   }
 
+  async function handleTogglePersonal(entryId: string, current: boolean) {
+    if (!me || busy) return;
+    setBusy(true);
+    setToolError(null);
+    const res = await setEntryPersonal(entryId, !current, me.id);
+    setBusy(false);
+    if (!res.ok) setToolError(res.reason ?? "Couldn't update.");
+  }
+
+  async function handleEditVat() {
+    if (!me || !receipt || busy) return;
+    const input = window.prompt(
+      `VAT amount already included in the ${peso(receipt.totalTyped)} receipt total?\n\n` +
+        `This is recorded for the bookkeeper only — it doesn't change the PCF balance or ` +
+        `reconciliation. Leave blank to clear.`,
+      receipt.vatAmount ? String(receipt.vatAmount) : "",
+    );
+    if (input === null) return;
+    const trimmed = input.replace(/[^\d.]/g, "");
+    const amount = trimmed === "" ? null : Number(trimmed) || 0;
+    setBusy(true);
+    setToolError(null);
+    const res = await setReceiptVat(receipt.id, amount, me.id);
+    setBusy(false);
+    if (!res.ok) setToolError(res.reason ?? "Couldn't save VAT.");
+  }
+
   async function handleDelete(entryId: string, label: string) {
     if (!me || busy) return;
     const ok = window.confirm(
@@ -244,6 +275,17 @@ export default function AdminGalleryDetailPage() {
                 {peso(receipt.totalTyped)}
               </p>
             </div>
+            {/* VAT included in the printed total — informational. */}
+            <button
+              onClick={handleEditVat}
+              disabled={busy}
+              className="mt-2 w-full flex items-center justify-between gap-2 rounded-lg border border-sand-200 bg-sand-50/60 px-3 h-9 text-left disabled:opacity-50 hover:bg-sand-100"
+            >
+              <span className="text-[11px] text-ink-500">VAT included in total</span>
+              <span className="text-xs font-medium text-ink-900">
+                {receipt.vatAmount ? peso(receipt.vatAmount) : "Add VAT"}
+              </span>
+            </button>
             {photoReady && (
               <div className="mt-2">
                 <ReplaceReceiptPhotoButton
@@ -355,6 +397,7 @@ export default function AdminGalleryDetailPage() {
             {linkedEntries.map((entry) => {
               const hasOpenFlag = entry.flags.some((f) => !f.resolved);
               const logger = getUserById(entry.loggedBy);
+              const personal = isEntryPersonal(entry.id);
               return (
                 <div
                   key={entry.id}
@@ -373,6 +416,11 @@ export default function AdminGalleryDetailPage() {
                           <AlertCircle className="w-3 h-3 text-clay-500 inline mr-1 -mt-0.5" />
                         )}
                         {entry.item}
+                        {personal && (
+                          <span className="ml-1.5 align-middle text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
+                            Personal
+                          </span>
+                        )}
                       </p>
                       <p className="text-[11px] text-ink-500 mt-0.5">
                         {entry.qty} × {peso(entry.unitPrice, { cents: true })} ·{" "}
@@ -388,6 +436,16 @@ export default function AdminGalleryDetailPage() {
                   </Link>
                   <div className="flex border-t border-sand-200/70 divide-x divide-sand-200/70">
                     <button
+                      onClick={() => handleTogglePersonal(entry.id, personal)}
+                      disabled={busy}
+                      className={
+                        "flex-1 h-8 inline-flex items-center justify-center gap-1.5 text-[11px] font-medium hover:bg-white/60 disabled:opacity-50 " +
+                        (personal ? "text-amber-700" : "text-ink-700")
+                      }
+                    >
+                      <Wallet className="w-3 h-3" /> {personal ? "Personal ✓" : "Personal"}
+                    </button>
+                    <button
                       onClick={() => handleSplit(entry.id, entry.item)}
                       disabled={busy}
                       className="flex-1 h-8 inline-flex items-center justify-center gap-1.5 text-[11px] font-medium text-ink-700 hover:bg-white/60 disabled:opacity-50"
@@ -399,7 +457,7 @@ export default function AdminGalleryDetailPage() {
                       disabled={busy}
                       className="flex-1 h-8 inline-flex items-center justify-center gap-1.5 text-[11px] font-medium text-clay-500 hover:bg-white/60 disabled:opacity-50"
                     >
-                      <Trash2 className="w-3 h-3" /> Delete line item
+                      <Trash2 className="w-3 h-3" /> Delete
                     </button>
                   </div>
                 </div>

@@ -302,16 +302,26 @@ export function isReceiptPhotoLoaded(id: string): boolean {
  * once an admin has deleted a line item and we need to log it. ocr_text is
  * read nowhere else, so this is safe.
  */
-function parseReceiptOcr(raw: unknown): {
+interface ReceiptOcrBlob {
   ocrText?: string;
   deletions: AuditRecord[];
   settled?: Receipt["settled"];
-} {
+  personalEntryIds?: string[];
+  vatAmount?: number;
+}
+
+function parseReceiptOcr(raw: unknown): ReceiptOcrBlob {
   if (typeof raw !== "string" || raw.trim() === "") return { deletions: [] };
   const s = raw.trim();
   if (s.startsWith("{")) {
     try {
-      const o = JSON.parse(s) as { ocr?: unknown; del?: unknown; set?: unknown };
+      const o = JSON.parse(s) as {
+        ocr?: unknown;
+        del?: unknown;
+        set?: unknown;
+        per?: unknown;
+        vat?: unknown;
+      };
       return {
         ocrText: typeof o.ocr === "string" ? o.ocr : undefined,
         deletions: Array.isArray(o.del) ? (o.del as AuditRecord[]) : [],
@@ -319,6 +329,9 @@ function parseReceiptOcr(raw: unknown): {
           o.set && typeof o.set === "object"
             ? (o.set as Receipt["settled"])
             : undefined,
+        personalEntryIds:
+          Array.isArray(o.per) && o.per.length > 0 ? (o.per as string[]) : undefined,
+        vatAmount: typeof o.vat === "number" ? (o.vat as number) : undefined,
       };
     } catch {
       return { ocrText: s, deletions: [] };
@@ -327,18 +340,38 @@ function parseReceiptOcr(raw: unknown): {
   return { ocrText: s, deletions: [] };
 }
 
-function serializeReceiptOcr(
-  ocrText: string | undefined,
-  deletions: AuditRecord[],
-  settled?: Receipt["settled"],
-): string | null {
+function serializeReceiptOcr(blob: ReceiptOcrBlob): string | null {
+  const { ocrText, deletions, settled, personalEntryIds, vatAmount } = blob;
   const hasOcr = !!(ocrText && ocrText.trim());
-  if (deletions.length === 0 && !settled) return hasOcr ? ocrText! : null;
+  const hasPersonal = !!(personalEntryIds && personalEntryIds.length > 0);
+  const hasVat = typeof vatAmount === "number" && vatAmount > 0;
+  if (deletions.length === 0 && !settled && !hasPersonal && !hasVat) {
+    return hasOcr ? ocrText! : null;
+  }
   return JSON.stringify({
     v: 1,
     ...(hasOcr ? { ocr: ocrText } : {}),
     ...(deletions.length > 0 ? { del: deletions } : {}),
     ...(settled ? { set: settled } : {}),
+    ...(hasPersonal ? { per: personalEntryIds } : {}),
+    ...(hasVat ? { vat: vatAmount } : {}),
+  });
+}
+
+/**
+ * Serialize a receipt's ocr_text blob from its current fields, with optional
+ * overrides. Using this (instead of passing fields by hand) means a caller
+ * editing one field can't silently drop the others (deletions, settled,
+ * personal items, VAT).
+ */
+function serializeReceiptOcrFor(r: Receipt, overrides: Partial<ReceiptOcrBlob> = {}): string | null {
+  return serializeReceiptOcr({
+    ocrText: r.ocrText,
+    deletions: r.deletions ?? [],
+    settled: r.settled,
+    personalEntryIds: r.personalEntryIds,
+    vatAmount: r.vatAmount,
+    ...overrides,
   });
 }
 
@@ -361,6 +394,8 @@ function mapReceipt(row: Record<string, unknown>): Receipt {
     status: row.status as Receipt["status"],
     deletions: ocr.deletions,
     settled: ocr.settled,
+    personalEntryIds: ocr.personalEntryIds,
+    vatAmount: ocr.vatAmount,
   };
 }
 
@@ -379,7 +414,7 @@ export async function markReceiptSettled(
   if (!receipt) return { ok: false, reason: "Receipt not found — refresh and try again." };
   // Prior state for undo.
   const prevStatus = receipt.status;
-  const prevOcr = serializeReceiptOcr(receipt.ocrText, receipt.deletions ?? [], receipt.settled);
+  const prevOcr = serializeReceiptOcrFor(receipt);
   const prevSettled = receipt.settled;
   const prevOcrText = receipt.ocrText;
   const prevDeletions = receipt.deletions;
@@ -388,7 +423,7 @@ export async function markReceiptSettled(
     by: byUserId,
     note: note?.trim() || undefined,
   };
-  const ocr = serializeReceiptOcr(receipt.ocrText, receipt.deletions ?? [], settled);
+  const ocr = serializeReceiptOcrFor(receipt, { settled });
   receipts = receipts.map((r) =>
     r.id === receiptId ? { ...r, settled, status: "reconciled" } : r,
   );
@@ -429,7 +464,7 @@ export async function unmarkReceiptSettled(
   if (!receipt) return { ok: false, reason: "Receipt not found — refresh and try again." };
   const remaining = entries.filter((e) => e.receiptId === receiptId);
   const status = receiptStatusFor(receipt, remaining);
-  const ocr = serializeReceiptOcr(receipt.ocrText, receipt.deletions ?? [], undefined);
+  const ocr = serializeReceiptOcrFor(receipt, { settled: undefined });
   receipts = receipts.map((r) =>
     r.id === receiptId ? { ...r, settled: undefined, status } : r,
   );
@@ -1341,6 +1376,8 @@ export async function addPurchase(input: {
   paidFrom: Entry["paidFrom"];
   capturedBy: string;
   receiptTotal?: number;
+  /** VAT already included in the receipt total — informational. */
+  vatAmount?: number;
   items: Array<{
     item: string;
     qty: number;
@@ -1348,6 +1385,8 @@ export async function addPurchase(input: {
     total: number;
     category: string;
     majorRepair?: boolean;
+    /** Personal purchase — keep on the receipt but don't deduct from PCF. */
+    isPersonal?: boolean;
     flags: Entry["flags"];
   }>;
 }): Promise<
@@ -1390,6 +1429,14 @@ export async function addPurchase(input: {
     history: [],
   }));
 
+  // Personal line items + VAT ride in the receipt's ocr_text blob.
+  const personalEntryIds = created
+    .filter((_, i) => input.items[i].isPersonal)
+    .map((e) => e.id);
+  receipt.personalEntryIds = personalEntryIds.length > 0 ? personalEntryIds : undefined;
+  receipt.vatAmount = input.vatAmount && input.vatAmount > 0 ? input.vatAmount : undefined;
+  const receiptOcr = serializeReceiptOcrFor(receipt);
+
   // Persist FIRST, then update local state. This used to be optimistic
   // (instant local update + fire-and-forget writes), which meant a failed
   // write — flaky Wi-Fi, mid-deploy hiccup — looked saved on screen and
@@ -1404,7 +1451,7 @@ export async function addPurchase(input: {
       vendor: receipt.vendor,
       date: receipt.date,
       photo_url: receipt.photoUrl,
-      ocr_text: null,
+      ocr_text: receiptOcr,
       total_typed: receipt.totalTyped,
       captured_by: receipt.capturedBy,
       status: receipt.status,
@@ -1526,6 +1573,7 @@ export async function addItemsToReceipt(input: {
     total: number;
     category: string;
     majorRepair?: boolean;
+    isPersonal?: boolean;
     flags: Entry["flags"];
   }>;
 }): Promise<{ ok: true; entries: Entry[] } | { ok: false; reason: string }> {
@@ -1591,6 +1639,7 @@ export async function addItemsToReceipt(input: {
   // Server confirmed — update local state and recompute the receipt status.
   // A settled receipt stays complete regardless of the new item sum.
   const priorStatus = receipt.status;
+  const priorPersonal = receipt.personalEntryIds;
   const linkedAfter = [
     ...entries.filter((e) => e.receiptId === receipt.id),
     ...created,
@@ -1599,13 +1648,22 @@ export async function addItemsToReceipt(input: {
   for (const e of created) {
     _entryMediaCache.set(e.id, { photoUrls: [], history: [] });
   }
+  // Carry over any personal line items added in this batch.
+  const newPersonal = created.filter((_, i) => input.items[i].isPersonal).map((e) => e.id);
+  const mergedPersonal = [...(receipt.personalEntryIds ?? []), ...newPersonal];
+  const personalEntryIds = mergedPersonal.length > 0 ? mergedPersonal : undefined;
+  const ocr = serializeReceiptOcrFor(receipt, { personalEntryIds });
   entries = [...created, ...entries];
-  receipts = receipts.map((r) => (r.id === receipt.id ? { ...r, status } : r));
+  receipts = receipts.map((r) => (r.id === receipt.id ? { ...r, status, personalEntryIds } : r));
   notify();
 
-  supabase.from("receipts").update({ status }).eq("id", receipt.id).then(({ error }) => {
-    if (error) console.error("supabase: addItemsToReceipt status", error);
-  });
+  supabase
+    .from("receipts")
+    .update({ status, ocr_text: ocr })
+    .eq("id", receipt.id)
+    .then(({ error }) => {
+      if (error) console.error("supabase: addItemsToReceipt status", error);
+    });
 
   // Undo = delete the just-added items and restore the receipt's prior status.
   const addedIds = created.map((e) => e.id);
@@ -1613,11 +1671,16 @@ export async function addItemsToReceipt(input: {
     `Added ${created.length} item${created.length === 1 ? "" : "s"} · ${receipt.vendor}`,
     async () => {
       const ok = await _hardDeleteEntries(addedIds);
-      receipts = receipts.map((r) => (r.id === receipt.id ? { ...r, status: priorStatus } : r));
+      receipts = receipts.map((r) =>
+        r.id === receipt.id ? { ...r, status: priorStatus, personalEntryIds: priorPersonal } : r,
+      );
       notify();
       const { error } = await supabase
         .from("receipts")
-        .update({ status: priorStatus })
+        .update({
+          status: priorStatus,
+          ocr_text: serializeReceiptOcrFor(receipt, { personalEntryIds: priorPersonal }),
+        })
         .eq("id", receipt.id);
       if (error) console.error("supabase: undo addItemsToReceipt", error);
       return { ok };
@@ -1815,6 +1878,8 @@ export async function deleteEntry(
   const priorDeletions = priorReceipt?.deletions;
   const priorSettled = priorReceipt?.settled;
   const priorOcrText = priorReceipt?.ocrText;
+  const priorPersonal = priorReceipt?.personalEntryIds;
+  const priorVat = priorReceipt?.vatAmount;
   if (receiptId) {
     const receipt = priorReceipt;
     if (receipt) {
@@ -1827,9 +1892,13 @@ export async function deleteEntry(
         summary: `Deleted line item “${entry.item}” · ₱${Math.round(entry.total).toLocaleString()}`,
       };
       const deletions = [...(receipt.deletions ?? []), record];
-      newOcr = serializeReceiptOcr(receipt.ocrText, deletions, receipt.settled);
+      // If the removed line item was a personal purchase, drop it from the set.
+      const trimmedPersonal = receipt.personalEntryIds?.filter((pid) => pid !== id);
+      const personalEntryIds =
+        trimmedPersonal && trimmedPersonal.length > 0 ? trimmedPersonal : undefined;
+      newOcr = serializeReceiptOcrFor(receipt, { deletions, personalEntryIds });
       receipts = receipts.map((r) =>
-        r.id === receiptId ? { ...r, status: newStatus!, deletions } : r,
+        r.id === receiptId ? { ...r, status: newStatus!, deletions, personalEntryIds } : r,
       );
     }
   }
@@ -1882,14 +1951,28 @@ export async function deleteEntry(
     if (receiptId && priorReceipt) {
       receipts = receipts.map((r) =>
         r.id === receiptId
-          ? { ...r, status: priorStatus!, deletions: priorDeletions, settled: priorSettled, ocrText: priorOcrText }
+          ? {
+              ...r,
+              status: priorStatus!,
+              deletions: priorDeletions,
+              settled: priorSettled,
+              ocrText: priorOcrText,
+              personalEntryIds: priorPersonal,
+              vatAmount: priorVat,
+            }
           : r,
       );
       await supabase
         .from("receipts")
         .update({
           status: priorStatus,
-          ocr_text: serializeReceiptOcr(priorOcrText, priorDeletions ?? [], priorSettled),
+          ocr_text: serializeReceiptOcr({
+            ocrText: priorOcrText,
+            deletions: priorDeletions ?? [],
+            settled: priorSettled,
+            personalEntryIds: priorPersonal,
+            vatAmount: priorVat,
+          }),
         })
         .eq("id", receiptId);
     }
@@ -1906,14 +1989,121 @@ export function getPcfLedger(): PcfLedgerEntry[] {
   return pcfLedger;
 }
 
+/**
+ * Set of entry ids marked as personal purchases across all receipts. These are
+ * line items paid with someone's own money — kept on the receipt but excluded
+ * from the petty cash drawdown. Built from the receipts' ocr_text blobs, which
+ * load eagerly, so the PCF balance is correct without fetching photos.
+ */
+export function getPersonalEntryIds(): Set<string> {
+  const set = new Set<string>();
+  for (const r of receipts) {
+    for (const id of r.personalEntryIds ?? []) set.add(id);
+  }
+  return set;
+}
+
+/** Sum of PCF-funded entry totals, excluding personal purchases. */
+export function getPcfDrawdownTotal(entryList: Entry[] = entries): number {
+  const personal = getPersonalEntryIds();
+  return entryList
+    .filter((e) => e.paidFrom === "pcf" && !personal.has(e.id))
+    .reduce((acc, e) => acc + e.total, 0);
+}
+
 export function getPcfBalance(): number {
   const topUps = pcfLedger
     .filter((p) => p.kind === "top-up" && p.status === "approved")
     .reduce((acc, p) => acc + p.amount, 0);
-  const drawdowns = entries
-    .filter((e) => e.paidFrom === "pcf")
-    .reduce((acc, e) => acc + e.total, 0);
-  return topUps - drawdowns;
+  return topUps - getPcfDrawdownTotal();
+}
+
+/** Is this entry flagged as a personal purchase (excluded from PCF)? */
+export function isEntryPersonal(entryId: string): boolean {
+  return receipts.some((r) => r.personalEntryIds?.includes(entryId));
+}
+
+/**
+ * Mark/unmark a line item as a personal purchase. The flag lives on the
+ * entry's receipt (ocr_text blob), so the entry must belong to a receipt.
+ * Excludes the amount from the PCF balance while keeping it on the receipt.
+ */
+export async function setEntryPersonal(
+  entryId: string,
+  isPersonal: boolean,
+  byUserId: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  const entry = entries.find((e) => e.id === entryId);
+  if (!entry) return { ok: false, reason: "Entry not found — refresh and try again." };
+  if (!entry.receiptId) {
+    return { ok: false, reason: "This entry isn't on a receipt, so it can't be marked personal." };
+  }
+  const receipt = receipts.find((r) => r.id === entry.receiptId);
+  if (!receipt) return { ok: false, reason: "Receipt not found — refresh and try again." };
+
+  const cur = receipt.personalEntryIds ?? [];
+  const next = isPersonal
+    ? Array.from(new Set([...cur, entryId]))
+    : cur.filter((id) => id !== entryId);
+  const personalEntryIds = next.length > 0 ? next : undefined;
+  const prevPersonal = receipt.personalEntryIds;
+  const ocr = serializeReceiptOcrFor(receipt, { personalEntryIds });
+
+  receipts = receipts.map((r) => (r.id === receipt.id ? { ...r, personalEntryIds } : r));
+  notify();
+
+  const { error } = await supabase
+    .from("receipts")
+    .update({ ocr_text: ocr })
+    .eq("id", receipt.id);
+  if (error) {
+    console.error("supabase: setEntryPersonal", error);
+    receipts = receipts.map((r) =>
+      r.id === receipt.id ? { ...r, personalEntryIds: prevPersonal } : r,
+    );
+    notify();
+    return { ok: false, reason: "Couldn't save — check your internet and try again." };
+  }
+  appendEntryHistory(entryId, {
+    at: new Date().toISOString(),
+    by: byUserId,
+    summary: isPersonal
+      ? "Marked as a personal purchase (excluded from PCF)"
+      : "Unmarked personal purchase",
+  });
+  return { ok: true };
+}
+
+/**
+ * Set (or clear, with null) the VAT amount already included in a receipt's
+ * printed total. Informational only — no effect on PCF or reconciliation.
+ */
+export async function setReceiptVat(
+  receiptId: string,
+  vatAmount: number | null,
+  byUserId: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  const receipt = receipts.find((r) => r.id === receiptId);
+  if (!receipt) return { ok: false, reason: "Receipt not found — refresh and try again." };
+  const next = vatAmount && vatAmount > 0 ? vatAmount : undefined;
+  const prev = receipt.vatAmount;
+  const ocr = serializeReceiptOcrFor(receipt, { vatAmount: next });
+
+  receipts = receipts.map((r) => (r.id === receiptId ? { ...r, vatAmount: next } : r));
+  notify();
+
+  const { error } = await supabase
+    .from("receipts")
+    .update({ ocr_text: ocr })
+    .eq("id", receiptId);
+  if (error) {
+    console.error("supabase: setReceiptVat", error);
+    receipts = receipts.map((r) => (r.id === receiptId ? { ...r, vatAmount: prev } : r));
+    notify();
+    return { ok: false, reason: "Couldn't save — check your internet and try again." };
+  }
+  void byUserId; // reserved for a future audit record
+  return { ok: true };
 }
 
 export function reportPcfTopUp(input: {

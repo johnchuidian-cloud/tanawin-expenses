@@ -124,6 +124,22 @@ export interface Receipt {
     by: string;
     note?: string;
   };
+  /**
+   * Line items (entries) on this receipt that were personal purchases — still
+   * printed on the same store receipt, but paid with someone's own money, so
+   * their amounts are NOT deducted from the petty cash balance. Stays in
+   * reports (clearly marked) and still counts toward reconciling the printed
+   * total. Stored as a list of entry ids in the ocr_text blob (eager, so the
+   * PCF balance is right at load without fetching photos). See parseReceiptOcr.
+   */
+  personalEntryIds?: string[];
+  /**
+   * VAT portion already included in `totalTyped` (Philippine receipts print a
+   * VAT-inclusive total plus the VAT breakdown). Informational for the
+   * bookkeeper — it does not change the PCF balance or reconciliation. Also
+   * packed into the ocr_text blob.
+   */
+  vatAmount?: number;
 }
 
 export interface Entry {

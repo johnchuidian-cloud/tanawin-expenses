@@ -40,6 +40,7 @@ interface LineItem {
   total: number;
   category: Category;
   majorRepair: boolean;
+  isPersonal: boolean;
 }
 
 function newId() {
@@ -85,6 +86,11 @@ export default function NewPurchasePage() {
   const [totalOverride, setTotalOverride] = useState<string | null>(null);
   const [category, setCategory] = useState<Category | "">("");
   const [majorRepair, setMajorRepair] = useState(false);
+  const [isPersonal, setIsPersonal] = useState(false);
+
+  // ---- Receipt-level VAT (already included in the printed total) ----
+  const [hasVat, setHasVat] = useState(false);
+  const [vatAmount, setVatAmount] = useState("");
 
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -120,6 +126,7 @@ export default function NewPurchasePage() {
     setTotalOverride(null);
     setCategory("");
     setMajorRepair(false);
+    setIsPersonal(false);
   }
 
   function handleCategoryChange(next: Category | "") {
@@ -143,6 +150,7 @@ export default function NewPurchasePage() {
       total: editorTotal,
       category,
       majorRepair: category === "Maintenance" ? majorRepair : false,
+      isPersonal,
     };
     setItems((list) =>
       editId ? list.map((x) => (x.id === editId ? li : x)) : [...list, li],
@@ -158,6 +166,7 @@ export default function NewPurchasePage() {
     setTotalOverride(li.total !== li.qty * li.unitPrice ? String(li.total) : null);
     setCategory(li.category);
     setMajorRepair(li.majorRepair);
+    setIsPersonal(li.isPersonal);
     setError(null);
   }
 
@@ -194,6 +203,7 @@ export default function NewPurchasePage() {
       total: li.total,
       category: li.category,
       majorRepair: li.category === "Maintenance" ? li.majorRepair : undefined,
+      isPersonal: li.isPersonal,
       flags: flagsForEntry(
         {
           date: saveDate,
@@ -239,6 +249,7 @@ export default function NewPurchasePage() {
       paidFrom,
       capturedBy: me.id,
       receiptTotal: receiptTotalNum ?? undefined,
+      vatAmount: hasVat ? Number(vatAmount) || undefined : undefined,
       items: purchaseItems,
     });
     setSaving(false);
@@ -437,7 +448,14 @@ export default function NewPurchasePage() {
                       <Icon className="w-4 h-4 text-ink-700" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-ink-900 truncate">{li.item}</p>
+                      <p className="text-sm text-ink-900 truncate">
+                        {li.item}
+                        {li.isPersonal && (
+                          <span className="ml-1.5 align-middle text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
+                            Personal
+                          </span>
+                        )}
+                      </p>
                       <p className="text-[11px] text-ink-500">
                         {li.qty} × {peso(li.unitPrice, { cents: true })} · {li.category}
                       </p>
@@ -603,6 +621,21 @@ export default function NewPurchasePage() {
             </label>
           )}
 
+          <label className="flex items-start gap-2 p-2.5 rounded-lg bg-white border border-sand-200 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isPersonal}
+              onChange={(e) => setIsPersonal(e.target.checked)}
+              className="mt-0.5"
+            />
+            <div className="flex-1">
+              <p className="text-sm text-ink-900">Personal purchase</p>
+              <p className="text-[11px] text-ink-500 mt-0.5">
+                Stays on the receipt, but this amount won&rsquo;t be deducted from the petty cash balance.
+              </p>
+            </div>
+          </label>
+
           <div className="flex gap-2">
             {editId && (
               <button type="button" onClick={clearEditor} className="btn btn-sm flex-1">
@@ -691,6 +724,43 @@ export default function NewPurchasePage() {
               Leave blank to use the items total. Fill it in to double-check the
               items add up.
             </p>
+          )}
+        </div>
+        )}
+
+        {/* VAT — already part of the receipt total; recorded for the bookkeeper */}
+        {!appendMode && (
+        <div>
+          <label className="flex items-start gap-2 p-2.5 rounded-lg bg-white border border-sand-200 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={hasVat}
+              onChange={(e) => {
+                setHasVat(e.target.checked);
+                if (!e.target.checked) setVatAmount("");
+              }}
+              className="mt-0.5"
+            />
+            <div className="flex-1">
+              <p className="text-sm text-ink-900">Receipt includes VAT</p>
+              <p className="text-[11px] text-ink-500 mt-0.5">
+                Already part of the total above — recorded for the bookkeeper, not deducted again.
+              </p>
+            </div>
+          </label>
+          {hasVat && (
+            <div className="mt-2">
+              <label htmlFor="vatAmount" className="label">VAT amount ₱</label>
+              <input
+                id="vatAmount"
+                type="text"
+                inputMode="decimal"
+                value={vatAmount}
+                onChange={(e) => setVatAmount(e.target.value.replace(/[^\d.]/g, ""))}
+                placeholder="e.g. the VAT line printed on the receipt"
+                className="input"
+              />
+            </div>
           )}
         </div>
         )}

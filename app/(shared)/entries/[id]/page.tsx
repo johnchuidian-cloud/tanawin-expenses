@@ -36,8 +36,10 @@ import {
   getReceiptById,
   getUserById,
   isEntryMediaLoaded,
+  isEntryPersonal,
   isReceiptPhotoLoaded,
   resolveFlag,
+  setEntryPersonal,
   setEntryPhotos,
 } from "@/lib/store";
 import { formatDate, formatDateTime, peso } from "@/lib/format";
@@ -75,6 +77,7 @@ export default function StaffEntryDetailPage() {
   const [reply, setReply] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
+  const [personalBusy, setPersonalBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   // Receipt photos are edited locally and committed with a manual Save, so
@@ -182,6 +185,18 @@ export default function StaffEntryDetailPage() {
   // on the shared receipt (stored once) rather than on the entry itself.
   const receipt = entry.receiptId ? getReceiptById(entry.receiptId) : undefined;
   const receiptItemCount = entry.receiptId ? getEntriesByReceipt(entry.receiptId).length : 0;
+  const personal = isEntryPersonal(entry.id);
+  // Personal can only be toggled on a line item that's on a receipt (the flag
+  // is stored there). Standalone entries don't qualify.
+  const canTogglePersonal = canEdit && !!entry.receiptId;
+
+  async function handleTogglePersonal() {
+    if (!entry || !me || personalBusy) return;
+    setPersonalBusy(true);
+    const res = await setEntryPersonal(entry.id, !personal, me.id);
+    setPersonalBusy(false);
+    if (!res.ok) setError(res.reason ?? "Couldn't update — try again.");
+  }
 
   async function handleRemove() {
     if (!entry || !me || removing) return;
@@ -295,7 +310,14 @@ export default function StaffEntryDetailPage() {
             <p className="text-[11px] text-ink-500">
               Logged by {logger?.name ?? "—"} · {formatDateTime(entry.createdAt)}
             </p>
-            {entry.paidFrom === "other" ? (
+            {personal ? (
+              <span
+                className="badge bg-amber-100 text-amber-800"
+                title="Personal purchase — on the receipt, but not deducted from PCF"
+              >
+                <Wallet className="w-3 h-3" /> Personal
+              </span>
+            ) : entry.paidFrom === "other" ? (
               <span
                 className={"badge " + paidFromBadgeClasses("other")}
                 title="Paid from another fund — doesn't affect PCF"
@@ -312,6 +334,26 @@ export default function StaffEntryDetailPage() {
             )}
           </div>
         </div>
+
+        {/* Personal-purchase toggle — keeps the item on the receipt but out of
+            the PCF balance. */}
+        {canTogglePersonal && (
+          <label className="mt-2 flex items-start gap-2 p-2.5 rounded-lg bg-white border border-sand-200 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={personal}
+              disabled={personalBusy}
+              onChange={handleTogglePersonal}
+              className="mt-0.5"
+            />
+            <div className="flex-1">
+              <p className="text-sm text-ink-900">Personal purchase</p>
+              <p className="text-[11px] text-ink-500 mt-0.5">
+                Stays on the receipt, but this amount isn&rsquo;t deducted from the petty cash balance.
+              </p>
+            </div>
+          </label>
+        )}
       </div>
 
       {/* Part of a multi-item receipt: the photo lives on the shared receipt

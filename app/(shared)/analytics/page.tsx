@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { useCurrentUser, homePathFor } from "@/lib/auth";
-import { getEntries, getUserById } from "@/lib/store";
+import { getEntries, getPersonalEntryIds, getUserById } from "@/lib/store";
 import { peso, pesoShort, monthLabel, toMonthKey, entryInMonth } from "@/lib/format";
 import { paidFromLabel } from "@/lib/payment-meta";
 import { tagColorAt, TAG_OTHER_COLOR } from "@/lib/chart-colors";
@@ -167,7 +167,12 @@ export default function AnalyticsPage() {
   }, [filtered]);
   const maxStaffTotal = byStaff[0]?.total ?? 1;
 
-  const pcfTotal = filtered.filter((e) => e.paidFrom === "pcf").reduce((s, e) => s + e.total, 0);
+  // Personal purchases don't draw against PCF, so they sit in the non-PCF
+  // bucket here (matching the petty cash balance).
+  const personalIds = getPersonalEntryIds();
+  const pcfTotal = filtered
+    .filter((e) => e.paidFrom === "pcf" && !personalIds.has(e.id))
+    .reduce((s, e) => s + e.total, 0);
   const otherTotal = total - pcfTotal;
 
   // Month trend — every month with data (capped to the most recent 12),

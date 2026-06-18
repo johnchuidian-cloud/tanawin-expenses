@@ -15,6 +15,7 @@ import {
   getEntries,
   getPcfBalance,
   getPcfLedger,
+  getPersonalEntryIds,
   getUserById,
 } from "@/lib/store";
 import { peso, relativeDate } from "@/lib/format";
@@ -42,12 +43,14 @@ export default function AdminPcfPage() {
     };
   }, [ledger]);
 
-  // Only PCF-funded entries draw against PCF. Entries paid from other
-  // funds (paidFrom === "other") appear in other reports but not here.
-  const pcfEntries = useMemo(
-    () => entries.filter((e) => e.paidFrom === "pcf"),
-    [entries],
-  );
+  // Only PCF-funded entries draw against PCF. Entries paid from other funds
+  // (paidFrom === "other") and personal purchases (marked, paid with own money)
+  // appear in other reports but not here — so this list and total match the
+  // PCF balance.
+  const pcfEntries = useMemo(() => {
+    const personal = getPersonalEntryIds();
+    return entries.filter((e) => e.paidFrom === "pcf" && !personal.has(e.id));
+  }, [entries]);
 
   // All PCF drawdowns, newest first. Shown in growing pages via "Show more"
   // so Lexi can scan well past the most recent few without filtering.
