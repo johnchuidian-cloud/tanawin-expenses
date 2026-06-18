@@ -14,6 +14,8 @@ import {
   getCategoryDefs,
   getEntries,
   getEntryById,
+  isEntryPersonal,
+  setEntryPersonal,
   updateEntry,
 } from "@/lib/store";
 import { peso, toIsoDate } from "@/lib/format";
@@ -88,6 +90,9 @@ function EditEntryForm({ entry, me }: { entry: Entry; me: User }) {
   const [category, setCategory] = useState<Category>(entry.category);
   const [majorRepair, setMajorRepair] = useState(!!entry.majorRepair);
   const [paidFrom, setPaidFrom] = useState<PaymentSource>(entry.paidFrom);
+  // Personal flag lives on the receipt, so it's only editable here when this
+  // entry belongs to one.
+  const [isPersonal, setIsPersonal] = useState(isEntryPersonal(entry.id));
   const [error, setError] = useState<string | null>(null);
 
   const numericQty = Number(qty) || 0;
@@ -189,6 +194,13 @@ function EditEntryForm({ entry, me }: { entry: Entry; me: User }) {
       majorRepair: effectiveMajor,
       flags: merged,
     });
+
+    // Personal flag is stored on the receipt (and writes its own audit note),
+    // so persist it separately — only when it changed and the entry is on a
+    // receipt.
+    if (entry.receiptId && isPersonal !== isEntryPersonal(entry.id)) {
+      void setEntryPersonal(entry.id, isPersonal, me.id);
+    }
 
     // Record what changed in the entry's edit history.
     const changes: string[] = [];
@@ -410,6 +422,24 @@ function EditEntryForm({ entry, me }: { entry: Entry; me: User }) {
             </p>
           )}
         </div>
+
+        {/* Personal purchase — only for line items on a receipt. */}
+        {entry.receiptId && (
+          <label className="flex items-start gap-2 p-3 rounded-lg bg-sand-50 border border-sand-200 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={isPersonal}
+              onChange={(e) => setIsPersonal(e.target.checked)}
+              className="mt-0.5"
+            />
+            <div className="flex-1">
+              <p className="text-sm text-ink-900">Personal purchase</p>
+              <p className="text-[11px] text-ink-500 mt-0.5">
+                Stays on the receipt, but this amount isn&rsquo;t deducted from the petty cash balance.
+              </p>
+            </div>
+          </label>
+        )}
 
         {category === "Maintenance" && (
           <label className="flex items-start gap-2 p-3 rounded-lg bg-sand-50 border border-sand-200 cursor-pointer">
