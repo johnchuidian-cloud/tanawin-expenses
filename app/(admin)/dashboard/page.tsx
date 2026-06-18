@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { AlertCircle, ArrowDownRight, ArrowUpRight, Clock, Plus, RotateCcw, UserCog, X } from "lucide-react";
+import { AlertCircle, ArrowDownRight, ArrowUpRight, Clock, Plus, RotateCcw, Store, UserCog, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { clearPcfBalance, getEntries, getPcfBalance, getPcfLedger, getUserById } from "@/lib/store";
@@ -410,6 +410,16 @@ export default function AdminDashboardPage() {
             <div className="min-w-0">
               <p className="text-sm font-medium text-ink-900">Manage tags</p>
               <p className="text-[10px] text-ink-500 leading-tight">Add · delete · edit</p>
+            </div>
+          </Link>
+          <Link
+            href="/vendors/manage"
+            className="flex items-center gap-2 p-3 rounded-lg bg-white border border-sand-200 hover:bg-sand-50 transition-colors"
+          >
+            <Store className="w-4 h-4 text-ink-700 flex-shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-ink-900">Manage vendors</p>
+              <p className="text-[10px] text-ink-500 leading-tight">Approve · merge · save</p>
             </div>
           </Link>
         </div>

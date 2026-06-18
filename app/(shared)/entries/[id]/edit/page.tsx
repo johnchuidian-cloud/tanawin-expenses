@@ -22,6 +22,7 @@ import { peso, toIsoDate } from "@/lib/format";
 import type { Category, Entry, Flag, PaymentSource, User } from "@/lib/types";
 import { iconFor } from "@/lib/category-meta";
 import { flagsForEntry, suggestsMajorRepair } from "@/lib/validation";
+import VendorInput from "@/components/VendorInput";
 
 export default function EditEntryPage() {
   useStoreTick();
@@ -261,18 +262,13 @@ function EditEntryForm({ entry, me }: { entry: Entry; me: User }) {
           </Link>
         )}
 
-        <div>
-          <label htmlFor="vendor" className="label">Vendor</label>
-          <input
-            id="vendor"
-            type="text"
-            value={vendor}
-            onChange={(e) => setVendor(e.target.value)}
-            placeholder="e.g. Puregold"
-            className="input"
-            autoComplete="off"
-          />
-        </div>
+        <VendorInput
+          value={vendor}
+          onChange={setVendor}
+          role={me.role}
+          userId={me.id}
+          label="Vendor"
+        />
 
         <div>
           <label htmlFor="item" className="label">Item</label>

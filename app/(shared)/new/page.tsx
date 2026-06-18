@@ -31,6 +31,7 @@ import type { Category, PaymentSource } from "@/lib/types";
 import { iconFor, staffCategoryLabel } from "@/lib/category-meta";
 import { suggestCategory } from "@/lib/category-hints";
 import { flagsForEntry, suggestsMajorRepair } from "@/lib/validation";
+import VendorInput from "@/components/VendorInput";
 
 interface LineItem {
   id: string;
@@ -324,15 +325,11 @@ export default function NewPurchasePage() {
         {!appendMode && (
         <div className="grid grid-cols-2 gap-3">
           <div className="col-span-2">
-            <label htmlFor="vendor" className="label">Vendor / store</label>
-            <input
-              id="vendor"
-              type="text"
+            <VendorInput
               value={vendor}
-              onChange={(e) => setVendor(e.target.value)}
-              placeholder="e.g. Puregold"
-              className="input"
-              autoComplete="off"
+              onChange={setVendor}
+              role={me?.role}
+              userId={me?.id ?? ""}
             />
           </div>
           <div className="col-span-2">

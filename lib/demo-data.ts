@@ -157,6 +157,7 @@ function demoBuilder(table: string) {
     order() { return b; },
     insert() { isWrite = true; return b; },
     update() { isWrite = true; return b; },
+    upsert() { isWrite = true; return b; },
     delete() { isWrite = true; return b; },
     eq(col: string, val: unknown) { filters.push((r) => r[col] === val); return b; },
     gte(col: string, val: unknown) { filters.push((r) => String(r[col]) >= String(val)); return b; },

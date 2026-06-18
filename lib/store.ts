@@ -11,7 +11,10 @@ import type {
   Note,
   PcfLedgerEntry,
   Receipt,
+  SavedVendor,
   User,
+  VendorRegistry,
+  VendorSuggestion,
 } from "./types";
 
 // ---------- IN-MEMORY STATE ----------
@@ -119,12 +122,13 @@ export async function bootstrapFromSupabase(): Promise<void> {
   _bootstrapping = true;
 
   try {
-    const [usersRes, receiptsRes, entriesRes, pcfRes, catRes] = await Promise.all([
+    const [usersRes, receiptsRes, entriesRes, pcfRes, catRes, vendorRes] = await Promise.all([
       supabase.from("users").select("*"),
       supabase.from("receipts").select(RECEIPT_COLS),
       supabase.from("entries").select(ENTRY_COLS).order("created_at", { ascending: false }),
       supabase.from("pcf_ledger").select("*").order("created_at", { ascending: false }),
       supabase.from("category_defs").select("*").eq("builtin", false),
+      supabase.from("category_defs").select("icon_key").eq("id", VENDOR_ROW_ID).maybeSingle(),
     ]);
 
     if (usersRes.error || receiptsRes.error || entriesRes.error || pcfRes.error || catRes.error) {
@@ -137,6 +141,8 @@ export async function bootstrapFromSupabase(): Promise<void> {
     receipts = receiptsRes.data!.map(mapReceipt);
     entries = entriesRes.data!.map(mapEntry);
     pcfLedger = pcfRes.data!.map(mapPcfLedger);
+    // Vendor registry is non-fatal: a hiccup here shouldn't block the app.
+    vendorRegistry = parseVendorRegistry(vendorRes?.error ? undefined : vendorRes?.data?.icon_key);
 
     if (catRes.data!.length > 0) {
       const customDefs = catRes.data!.map(mapCategoryDef);
@@ -179,12 +185,13 @@ export async function refreshFromSupabase(): Promise<void> {
   if (!_bootstrapped || _refreshing) return;
   _refreshing = true;
   try {
-    const [usersRes, receiptsRes, entriesRes, pcfRes, catRes] = await Promise.all([
+    const [usersRes, receiptsRes, entriesRes, pcfRes, catRes, vendorRes] = await Promise.all([
       supabase.from("users").select("*"),
       supabase.from("receipts").select(RECEIPT_COLS),
       supabase.from("entries").select(ENTRY_COLS).order("created_at", { ascending: false }),
       supabase.from("pcf_ledger").select("*").order("created_at", { ascending: false }),
       supabase.from("category_defs").select("*").eq("builtin", false),
+      supabase.from("category_defs").select("icon_key").eq("id", VENDOR_ROW_ID).maybeSingle(),
     ]);
     if (
       usersRes.error || receiptsRes.error || entriesRes.error ||
@@ -199,6 +206,7 @@ export async function refreshFromSupabase(): Promise<void> {
     receipts = receiptsRes.data!.map(mapReceipt);
     entries = entriesRes.data!.map(mapEntry);
     pcfLedger = pcfRes.data!.map(mapPcfLedger);
+    vendorRegistry = parseVendorRegistry(vendorRes?.error ? undefined : vendorRes?.data?.icon_key);
     const customDefs = catRes.data!.map(mapCategoryDef);
     categoryDefs = [...BUILTIN_DEFS, ...customDefs].map((def) => {
       const overrides = _hintOverrides[def.id];
@@ -913,6 +921,299 @@ export function updateCategoryHints(
         if (error) console.error("supabase: updateCategoryHints", error);
       });
   }
+}
+
+// ---------- VENDORS (shared canonical registry) ----------
+//
+// Canonical vendor names + their alternate spellings, plus staff-proposed
+// suggestions awaiting admin approval. Stored as one JSON blob on a sentinel
+// category_defs row (id "__vendors__", builtin:true so the category fetch —
+// which filters builtin=false — never sees it). No DDL; syncs to all devices.
+
+const VENDOR_ROW_ID = "__vendors__";
+let vendorRegistry: VendorRegistry = { v: 1, vendors: [], suggestions: [] };
+
+/** Lowercase, strip punctuation, collapse whitespace — for matching. */
+export function normalizeVendor(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+/** Normalized name with spaces removed — catches "Pure Gold" vs "Puregold". */
+function squashVendor(s: string): string {
+  return normalizeVendor(s).replace(/\s+/g, "");
+}
+
+function parseVendorRegistry(raw: unknown): VendorRegistry {
+  const empty: VendorRegistry = { v: 1, vendors: [], suggestions: [] };
+  if (typeof raw !== "string" || raw.trim() === "") return empty;
+  try {
+    const o = JSON.parse(raw) as Partial<VendorRegistry>;
+    return {
+      v: 1,
+      vendors: Array.isArray(o.vendors)
+        ? o.vendors
+            .filter((x): x is SavedVendor => !!x && typeof x.name === "string")
+            .map((x) => ({ name: x.name, aliases: Array.isArray(x.aliases) ? x.aliases : [] }))
+        : [],
+      suggestions: Array.isArray(o.suggestions)
+        ? (o.suggestions.filter(
+            (x) => !!x && typeof (x as VendorSuggestion).name === "string",
+          ) as VendorSuggestion[])
+        : [],
+    };
+  } catch {
+    return empty;
+  }
+}
+
+async function persistVendorRegistry(): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from("category_defs")
+      .upsert(
+        { id: VENDOR_ROW_ID, builtin: true, icon_key: JSON.stringify(vendorRegistry) },
+        { onConflict: "id" },
+      );
+    if (error) {
+      console.error("supabase: persistVendorRegistry", error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("supabase: persistVendorRegistry threw", err);
+    return false;
+  }
+}
+
+export function getVendorRegistry(): VendorRegistry {
+  return vendorRegistry;
+}
+export function getSavedVendors(): SavedVendor[] {
+  return [...vendorRegistry.vendors].sort((a, b) => a.name.localeCompare(b.name));
+}
+export function getPendingVendorSuggestions(): VendorSuggestion[] {
+  return [...vendorRegistry.suggestions].sort((a, b) => (a.at < b.at ? 1 : -1));
+}
+
+/**
+ * Names offered as plain autocomplete on the vendor field: saved canonical
+ * names plus every vendor already used on an entry/receipt, de-duplicated.
+ */
+export function getVendorAutocomplete(): string[] {
+  const seen = new Map<string, string>(); // normalized -> display
+  for (const v of vendorRegistry.vendors) seen.set(normalizeVendor(v.name), v.name);
+  for (const e of entries) {
+    const k = normalizeVendor(e.vendor);
+    if (k && !seen.has(k)) seen.set(k, e.vendor);
+  }
+  for (const r of receipts) {
+    const k = normalizeVendor(r.vendor);
+    if (k && !seen.has(k)) seen.set(k, r.vendor);
+  }
+  return Array.from(seen.values()).sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * If the typed vendor looks like a known variant, return the canonical name to
+ * suggest ("Did you mean…?"). Returns null when it already matches a canonical
+ * name exactly, or nothing close is found. Suggest-only — never auto-applies.
+ */
+export function suggestCanonicalVendor(input: string): string | null {
+  const norm = normalizeVendor(input);
+  if (!norm) return null;
+  const squashed = squashVendor(input);
+  for (const v of vendorRegistry.vendors) {
+    const canonNorm = normalizeVendor(v.name);
+    if (norm === canonNorm) return null; // already canonical
+    if (v.aliases.includes(norm)) return v.name; // known alias
+    if (squashed && squashed === squashVendor(v.name)) return v.name; // spacing-only diff
+    if (v.aliases.some((a) => squashVendor(a) === squashed)) return v.name;
+  }
+  return null;
+}
+
+/** Add or update a canonical vendor (admin). Merges aliases if it exists. */
+export async function addSavedVendor(
+  name: string,
+  aliases: string[] = [],
+): Promise<{ ok: boolean; reason?: string }> {
+  const clean = name.trim();
+  if (!clean) return { ok: false, reason: "Vendor name is required." };
+  const normAliases = Array.from(
+    new Set(aliases.map(normalizeVendor).filter((a) => a && a !== normalizeVendor(clean))),
+  );
+  const prev = vendorRegistry;
+  const existing = vendorRegistry.vendors.find(
+    (v) => normalizeVendor(v.name) === normalizeVendor(clean),
+  );
+  if (existing) {
+    vendorRegistry = {
+      ...vendorRegistry,
+      vendors: vendorRegistry.vendors.map((v) =>
+        v === existing
+          ? { name: clean, aliases: Array.from(new Set([...v.aliases, ...normAliases])) }
+          : v,
+      ),
+    };
+  } else {
+    vendorRegistry = {
+      ...vendorRegistry,
+      vendors: [...vendorRegistry.vendors, { name: clean, aliases: normAliases }],
+    };
+  }
+  notify();
+  if (!(await persistVendorRegistry())) {
+    vendorRegistry = prev;
+    notify();
+    return { ok: false, reason: "Couldn't save — check your internet and try again." };
+  }
+  return { ok: true };
+}
+
+/** Remove a canonical vendor (admin). */
+export async function removeSavedVendor(name: string): Promise<{ ok: boolean; reason?: string }> {
+  const prev = vendorRegistry;
+  vendorRegistry = {
+    ...vendorRegistry,
+    vendors: vendorRegistry.vendors.filter(
+      (v) => normalizeVendor(v.name) !== normalizeVendor(name),
+    ),
+  };
+  notify();
+  if (!(await persistVendorRegistry())) {
+    vendorRegistry = prev;
+    notify();
+    return { ok: false, reason: "Couldn't save — try again." };
+  }
+  return { ok: true };
+}
+
+/** Staff proposes a vendor to be saved (admin approves later). */
+export async function proposeVendor(
+  name: string,
+  proposedBy: string,
+  note?: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  const clean = name.trim();
+  if (!clean) return { ok: false, reason: "Type a vendor name first." };
+  const norm = normalizeVendor(clean);
+  if (vendorRegistry.vendors.some((v) => normalizeVendor(v.name) === norm)) {
+    return { ok: false, reason: "That vendor is already saved." };
+  }
+  if (vendorRegistry.suggestions.some((s) => normalizeVendor(s.name) === norm)) {
+    return { ok: false, reason: "That vendor has already been suggested." };
+  }
+  const suggestion: VendorSuggestion = {
+    id: `vs_${Math.random().toString(36).slice(2, 10)}`,
+    name: clean,
+    aliases: [],
+    proposedBy,
+    at: new Date().toISOString(),
+    note: note?.trim() || undefined,
+  };
+  const prev = vendorRegistry;
+  vendorRegistry = { ...vendorRegistry, suggestions: [...vendorRegistry.suggestions, suggestion] };
+  notify();
+  if (!(await persistVendorRegistry())) {
+    vendorRegistry = prev;
+    notify();
+    return { ok: false, reason: "Couldn't send — check your internet and try again." };
+  }
+  return { ok: true };
+}
+
+/** Admin approves a suggestion → it becomes a saved vendor. */
+export async function approveVendorSuggestion(id: string): Promise<{ ok: boolean; reason?: string }> {
+  const sug = vendorRegistry.suggestions.find((s) => s.id === id);
+  if (!sug) return { ok: false, reason: "Suggestion not found — refresh and try again." };
+  const prev = vendorRegistry;
+  const norm = normalizeVendor(sug.name);
+  const vendors = vendorRegistry.vendors.some((v) => normalizeVendor(v.name) === norm)
+    ? vendorRegistry.vendors
+    : [...vendorRegistry.vendors, { name: sug.name, aliases: sug.aliases }];
+  vendorRegistry = {
+    ...vendorRegistry,
+    vendors,
+    suggestions: vendorRegistry.suggestions.filter((s) => s.id !== id),
+  };
+  notify();
+  if (!(await persistVendorRegistry())) {
+    vendorRegistry = prev;
+    notify();
+    return { ok: false, reason: "Couldn't save — try again." };
+  }
+  return { ok: true };
+}
+
+/** Admin dismisses a suggestion. */
+export async function rejectVendorSuggestion(id: string): Promise<{ ok: boolean; reason?: string }> {
+  const prev = vendorRegistry;
+  vendorRegistry = {
+    ...vendorRegistry,
+    suggestions: vendorRegistry.suggestions.filter((s) => s.id !== id),
+  };
+  notify();
+  if (!(await persistVendorRegistry())) {
+    vendorRegistry = prev;
+    notify();
+    return { ok: false, reason: "Couldn't save — try again." };
+  }
+  return { ok: true };
+}
+
+/** How many entries/receipts currently use any of these vendor spellings. */
+export function countVendorUsage(names: string[]): number {
+  const norms = new Set(names.map(normalizeVendor));
+  const e = entries.filter((x) => norms.has(normalizeVendor(x.vendor))).length;
+  const r = receipts.filter((x) => norms.has(normalizeVendor(x.vendor))).length;
+  return e + r;
+}
+
+/**
+ * Consolidate vendors: rewrite every entry & receipt whose vendor matches any
+ * of `fromNames` to `canonicalName`, register the canonical vendor, and keep
+ * the old spellings as aliases so future entries get auto-suggested. Admin
+ * cleanup tool — mirrors the bulk-correction REST pattern.
+ */
+export async function mergeVendors(
+  fromNames: string[],
+  canonicalName: string,
+  byUserId: string,
+): Promise<{ ok: boolean; reason?: string; changed: number }> {
+  const canonical = canonicalName.trim();
+  if (!canonical) return { ok: false, reason: "Pick the correct vendor name.", changed: 0 };
+  const canonNorm = normalizeVendor(canonical);
+  const fromNorms = new Set(fromNames.map(normalizeVendor).filter((n) => n && n !== canonNorm));
+
+  // Rewrite matching entries (optimistic local + fire-and-forget PATCH each).
+  const entryHits = entries.filter((e) => fromNorms.has(normalizeVendor(e.vendor)));
+  for (const e of entryHits) {
+    updateEntry(e.id, { vendor: canonical });
+    appendEntryHistory(e.id, {
+      at: new Date().toISOString(),
+      by: byUserId,
+      summary: `Vendor corrected to “${canonical}”`,
+    });
+  }
+
+  // Rewrite matching receipts.
+  const receiptHits = receipts.filter((r) => fromNorms.has(normalizeVendor(r.vendor)));
+  receipts = receipts.map((r) =>
+    fromNorms.has(normalizeVendor(r.vendor)) ? { ...r, vendor: canonical } : r,
+  );
+  notify();
+  for (const r of receiptHits) {
+    const { error } = await supabase.from("receipts").update({ vendor: canonical }).eq("id", r.id);
+    if (error) console.error("supabase: mergeVendors receipt", error);
+  }
+
+  // Record the canonical vendor + fold the old spellings in as aliases.
+  await addSavedVendor(canonical, Array.from(fromNorms));
+
+  return { ok: true, changed: entryHits.length + receiptHits.length };
 }
 
 // ---------- PUB-SUB ----------

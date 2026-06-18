@@ -230,6 +230,39 @@ export interface PcfLedgerEntry {
 }
 
 /**
+ * A saved (canonical) vendor and the alternate spellings that should map to
+ * it. Aliases are stored normalized (lowercase, punctuation/space-stripped)
+ * for matching — see normalizeVendor in lib/store.ts.
+ */
+export interface SavedVendor {
+  /** Canonical display name, e.g. "Puregold". */
+  name: string;
+  /** Normalized alternate spellings, e.g. ["pure gold", "puregoldsm"]. */
+  aliases: string[];
+}
+
+/** A staff-proposed vendor awaiting admin approval. */
+export interface VendorSuggestion {
+  id: string;
+  name: string;
+  aliases: string[];
+  proposedBy: string; // user id
+  at: string; // ISO timestamp
+  note?: string;
+}
+
+/**
+ * The shared vendor registry — canonical vendors plus pending suggestions.
+ * Persisted as one JSON blob on a sentinel category_defs row (no DDL), so it
+ * syncs to every device. See loadVendorRegistry in lib/store.ts.
+ */
+export interface VendorRegistry {
+  v: 1;
+  vendors: SavedVendor[];
+  suggestions: VendorSuggestion[];
+}
+
+/**
  * App-level settings, kept in one place so tuning sensitivity etc.
  * is a single source of truth.
  */
