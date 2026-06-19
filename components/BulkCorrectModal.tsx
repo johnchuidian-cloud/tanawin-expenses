@@ -13,7 +13,8 @@
 
 import { useMemo, useState } from "react";
 import { Check, Loader2, Wand2, X } from "lucide-react";
-import { getCategoryDefs, updateEntry } from "@/lib/store";
+import { appendEntryHistory, getCategoryDefs, updateEntry } from "@/lib/store";
+import { useCurrentUser } from "@/lib/auth";
 import { peso } from "@/lib/format";
 import { paidFromLabel } from "@/lib/payment-meta";
 import type { Entry, PaymentSource } from "@/lib/types";
@@ -32,6 +33,7 @@ export default function BulkCorrectModal({
   onApplied: (count: number) => void;
 }) {
   const categories = getCategoryDefs();
+  const me = useCurrentUser();
 
   // Default the month picker to the most common month among the selection, so
   // a typical "these are all really April" fix opens close to the answer.
@@ -65,6 +67,16 @@ export default function BulkCorrectModal({
     return u;
   }
 
+  // Human-readable summary of what actually changed for one entry — for the
+  // audit history. Returns null when nothing differs from the current values.
+  function changeSummary(entry: Entry, u: Partial<Entry>): string | null {
+    const parts: string[] = [];
+    if (u.date && u.date !== entry.date) parts.push(`date → ${u.date}`);
+    if (u.category && u.category !== entry.category) parts.push(`category → ${u.category}`);
+    if (u.paidFrom && u.paidFrom !== entry.paidFrom) parts.push(`funding → ${paidFromLabel(u.paidFrom)}`);
+    return parts.length ? `Bulk correction: ${parts.join(", ")}` : null;
+  }
+
   function handleApply() {
     if (!anyField || busy) return;
     setBusy(true);
@@ -73,6 +85,12 @@ export default function BulkCorrectModal({
       const u = buildUpdates(e);
       if (Object.keys(u).length > 0) {
         updateEntry(e.id, u);
+        // Log the change to the entry's edit history (single-entry edits do
+        // this too; bulk previously didn't, leaving no audit trail).
+        const summary = changeSummary(e, u);
+        if (summary && me) {
+          appendEntryHistory(e.id, { at: new Date().toISOString(), by: me.id, summary });
+        }
         n++;
       }
     }
