@@ -11,6 +11,7 @@ import { staffCategoryLabel } from "@/lib/category-meta";
 import { MonthGrid, type MonthScope } from "@/components/MonthGrid";
 import ExpenseByTagChart from "@/components/ExpenseByTagChart";
 import ExportButton from "@/components/ExportButton";
+import RefreshButton from "@/components/RefreshButton";
 
 export default function StaffHomePage() {
   useStoreTick(); // re-render on store changes
@@ -138,7 +139,10 @@ export default function StaffHomePage() {
             <p className="text-3xl font-medium text-leaf-600 mt-1">{peso(balance)}</p>
           </div>
           {/* Excel export is for everyone (admin/staff/guest), not just Lexi. */}
-          <ExportButton variant="sm" />
+          <div className="flex flex-col items-end gap-1.5">
+            <RefreshButton />
+            <ExportButton variant="sm" />
+          </div>
         </div>
         <div className="flex items-center justify-between mt-2">
           <p className="text-xs text-leaf-600">

@@ -22,6 +22,7 @@ import { peso, relativeDate } from "@/lib/format";
 import { paidFromRowClasses } from "@/lib/payment-meta";
 import ExportButton from "@/components/ExportButton";
 import ReceiptsPackButton from "@/components/ReceiptsPackButton";
+import RefreshButton from "@/components/RefreshButton";
 import PendingTopUpCard from "@/components/PendingTopUpCard";
 
 export default function AdminPcfPage() {
@@ -118,6 +119,7 @@ export default function AdminPcfPage() {
             </div>
           </div>
           <div className="flex flex-col items-end gap-1.5">
+            <RefreshButton />
             <ExportButton variant="sm" />
             <ReceiptsPackButton variant="sm" />
           </div>

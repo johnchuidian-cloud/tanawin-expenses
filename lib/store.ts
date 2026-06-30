@@ -117,6 +117,28 @@ function sortUsers(list: User[]): User[] {
   });
 }
 
+/**
+ * Fetch EVERY row from a query, paging past PostgREST's default 1000-row cap.
+ * Without this, large tables (entries) silently truncate at 1000 rows — which
+ * made all-time totals like the PCF balance read wrong once entries crossed
+ * 1000 (the oldest rows dropped, their drawdowns never subtracted).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function selectAllRows(
+  build: (from: number, to: number) => PromiseLike<{ data: any[] | null; error: unknown }>,
+): Promise<{ data: Record<string, unknown>[] | null; error: unknown }> {
+  const pageSize = 1000;
+  const all: Record<string, unknown>[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await build(from, from + pageSize - 1);
+    if (error) return { data: null, error };
+    const rows = data ?? [];
+    all.push(...rows);
+    if (rows.length < pageSize) break;
+  }
+  return { data: all, error: null };
+}
+
 export async function bootstrapFromSupabase(): Promise<void> {
   if (_bootstrapped || _bootstrapping) return;
   _bootstrapping = true;
@@ -124,9 +146,13 @@ export async function bootstrapFromSupabase(): Promise<void> {
   try {
     const [usersRes, receiptsRes, entriesRes, pcfRes, catRes, vendorRes] = await Promise.all([
       supabase.from("users").select("*"),
-      supabase.from("receipts").select(RECEIPT_COLS),
-      supabase.from("entries").select(ENTRY_COLS).order("created_at", { ascending: false }),
-      supabase.from("pcf_ledger").select("*").order("created_at", { ascending: false }),
+      selectAllRows((f, t) => supabase.from("receipts").select(RECEIPT_COLS).range(f, t)),
+      selectAllRows((f, t) =>
+        supabase.from("entries").select(ENTRY_COLS).order("created_at", { ascending: false }).range(f, t),
+      ),
+      selectAllRows((f, t) =>
+        supabase.from("pcf_ledger").select("*").order("created_at", { ascending: false }).range(f, t),
+      ),
       supabase.from("category_defs").select("*").eq("builtin", false),
       supabase.from("category_defs").select("icon_key").eq("id", VENDOR_ROW_ID).maybeSingle(),
     ]);
@@ -187,9 +213,13 @@ export async function refreshFromSupabase(): Promise<void> {
   try {
     const [usersRes, receiptsRes, entriesRes, pcfRes, catRes, vendorRes] = await Promise.all([
       supabase.from("users").select("*"),
-      supabase.from("receipts").select(RECEIPT_COLS),
-      supabase.from("entries").select(ENTRY_COLS).order("created_at", { ascending: false }),
-      supabase.from("pcf_ledger").select("*").order("created_at", { ascending: false }),
+      selectAllRows((f, t) => supabase.from("receipts").select(RECEIPT_COLS).range(f, t)),
+      selectAllRows((f, t) =>
+        supabase.from("entries").select(ENTRY_COLS).order("created_at", { ascending: false }).range(f, t),
+      ),
+      selectAllRows((f, t) =>
+        supabase.from("pcf_ledger").select("*").order("created_at", { ascending: false }).range(f, t),
+      ),
       supabase.from("category_defs").select("*").eq("builtin", false),
       supabase.from("category_defs").select("icon_key").eq("id", VENDOR_ROW_ID).maybeSingle(),
     ]);
@@ -697,17 +727,23 @@ export function loadAllMedia(scope: "all" | string): Promise<boolean> {
 
 async function loadAllMediaUncached(scope: "all" | string): Promise<boolean> {
   try {
-    let rq = supabase.from("receipts").select("id,photo_url");
-    let eq = supabase.from("entries").select("id,photo_url");
+    let start = "", end = "";
     if (scope !== "all") {
       const [y, m] = scope.split("-").map(Number);
-      const start = `${scope}-01`;
-      const lastDay = new Date(y, m, 0).getDate();
-      const end = `${scope}-${String(lastDay).padStart(2, "0")}`;
-      rq = rq.gte("date", start).lte("date", end);
-      eq = eq.gte("date", start).lte("date", end);
+      start = `${scope}-01`;
+      end = `${scope}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
     }
-    const [rRes, eRes] = await Promise.all([rq, eq]);
+    // Paginate — the "all" scope (and any month with >1000 rows) would
+    // otherwise truncate at PostgREST's 1000-row cap and miss photos.
+    const range = (table: string) => (f: number, t: number) => {
+      let q = supabase.from(table).select("id,photo_url");
+      if (scope !== "all") q = q.gte("date", start).lte("date", end);
+      return q.range(f, t);
+    };
+    const [rRes, eRes] = await Promise.all([
+      selectAllRows(range("receipts")),
+      selectAllRows(range("entries")),
+    ]);
     if (rRes.error || eRes.error) {
       console.error("supabase: loadAllMedia", { rRes, eRes });
       return false;

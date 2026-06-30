@@ -159,6 +159,7 @@ function demoBuilder(table: string) {
     update() { isWrite = true; return b; },
     upsert() { isWrite = true; return b; },
     delete() { isWrite = true; return b; },
+    range() { return b; }, // demo data is tiny; one page returns everything
     eq(col: string, val: unknown) { filters.push((r) => r[col] === val); return b; },
     gte(col: string, val: unknown) { filters.push((r) => String(r[col]) >= String(val)); return b; },
     lte(col: string, val: unknown) { filters.push((r) => String(r[col]) <= String(val)); return b; },

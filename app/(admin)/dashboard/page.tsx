@@ -9,6 +9,7 @@ import { clearPcfBalance, getEntries, getPcfBalance, getPcfLedger, getUserById }
 import { peso, pesoShort, relativeDate, formatDate, toIsoDate, toMonthKey, entryInMonth, monthLabel } from "@/lib/format";
 import ExportButton from "@/components/ExportButton";
 import ReceiptsPackButton from "@/components/ReceiptsPackButton";
+import RefreshButton from "@/components/RefreshButton";
 import ExpenseByTagChart from "@/components/ExpenseByTagChart";
 import { paidFromBadgeClasses, paidFromLabel, paidFromRowClasses } from "@/lib/payment-meta";
 import { MonthGrid, type MonthScope } from "@/components/MonthGrid";
@@ -203,6 +204,7 @@ export default function AdminDashboardPage() {
             </p>
           </div>
           <div className="flex flex-col items-end gap-1.5">
+            <RefreshButton />
             <ExportButton variant="sm" />
             <ReceiptsPackButton variant="sm" />
           </div>
