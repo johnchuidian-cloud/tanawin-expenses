@@ -154,7 +154,7 @@ export async function bootstrapFromSupabase(): Promise<void> {
         supabase.from("pcf_ledger").select("*").order("created_at", { ascending: false }).range(f, t),
       ),
       supabase.from("category_defs").select("*").eq("builtin", false),
-      supabase.from("category_defs").select("icon_key").eq("id", VENDOR_ROW_ID).maybeSingle(),
+      supabase.from("category_defs").select("id,icon_key").in("id", [VENDOR_ROW_ID, CATEGORY_ALIAS_ROW_ID]),
     ]);
 
     if (usersRes.error || receiptsRes.error || entriesRes.error || pcfRes.error || catRes.error) {
@@ -167,8 +167,8 @@ export async function bootstrapFromSupabase(): Promise<void> {
     receipts = receiptsRes.data!.map(mapReceipt);
     entries = entriesRes.data!.map(mapEntry);
     pcfLedger = pcfRes.data!.map(mapPcfLedger);
-    // Vendor registry is non-fatal: a hiccup here shouldn't block the app.
-    vendorRegistry = parseVendorRegistry(vendorRes?.error ? undefined : vendorRes?.data?.icon_key);
+    // Registries are non-fatal: a hiccup here shouldn't block the app.
+    applyRegistryRows(vendorRes?.error ? [] : vendorRes?.data);
 
     if (catRes.data!.length > 0) {
       const customDefs = catRes.data!.map(mapCategoryDef);
@@ -221,7 +221,7 @@ export async function refreshFromSupabase(): Promise<void> {
         supabase.from("pcf_ledger").select("*").order("created_at", { ascending: false }).range(f, t),
       ),
       supabase.from("category_defs").select("*").eq("builtin", false),
-      supabase.from("category_defs").select("icon_key").eq("id", VENDOR_ROW_ID).maybeSingle(),
+      supabase.from("category_defs").select("id,icon_key").in("id", [VENDOR_ROW_ID, CATEGORY_ALIAS_ROW_ID]),
     ]);
     if (
       usersRes.error || receiptsRes.error || entriesRes.error ||
@@ -236,7 +236,7 @@ export async function refreshFromSupabase(): Promise<void> {
     receipts = receiptsRes.data!.map(mapReceipt);
     entries = entriesRes.data!.map(mapEntry);
     pcfLedger = pcfRes.data!.map(mapPcfLedger);
-    vendorRegistry = parseVendorRegistry(vendorRes?.error ? undefined : vendorRes?.data?.icon_key);
+    applyRegistryRows(vendorRes?.error ? [] : vendorRes?.data);
     const customDefs = catRes.data!.map(mapCategoryDef);
     categoryDefs = [...BUILTIN_DEFS, ...customDefs].map((def) => {
       const overrides = _hintOverrides[def.id];
@@ -957,6 +957,170 @@ export function updateCategoryHints(
         if (error) console.error("supabase: updateCategoryHints", error);
       });
   }
+}
+
+// ---------- CATEGORY DEDUPE (aliases + fuzzy guard + merge) ----------
+//
+// Categories aren't free-typed (staff pick from a list), so bloat comes from
+// admins CREATING near-duplicates ("Cleaning Supplies" vs "Cleaning supplies"
+// vs "Cleaners") in manage-categories. Mirrors the vendor registry: a
+// creation-time fuzzy guard + a merge tool, with an alias map (old name ->
+// canonical id) that grows as merges happen, so a merged-away name can't be
+// resurrected by accident. Stored as one JSON blob on a sentinel category_defs
+// row "__cat_aliases__" (builtin:true so the category fetch skips it).
+
+const CATEGORY_ALIAS_ROW_ID = "__cat_aliases__";
+let categoryAliases: Record<string, string> = {}; // normalized old name -> canonical id
+
+function parseCategoryAliases(raw: unknown): Record<string, string> {
+  if (typeof raw !== "string" || !raw.trim().startsWith("{")) return {};
+  try {
+    const o = JSON.parse(raw) as Record<string, unknown>;
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(o)) if (typeof v === "string") out[k] = v;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+async function persistCategoryAliases(): Promise<boolean> {
+  try {
+    const { error } = await supabase
+      .from("category_defs")
+      .upsert(
+        { id: CATEGORY_ALIAS_ROW_ID, builtin: true, icon_key: JSON.stringify(categoryAliases) },
+        { onConflict: "id" },
+      );
+    if (error) {
+      console.error("supabase: persistCategoryAliases", error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("supabase: persistCategoryAliases threw", err);
+    return false;
+  }
+}
+
+/** Apply the two sentinel registry rows (vendor registry + category aliases). */
+function applyRegistryRows(rows: Array<Record<string, unknown>> | null | undefined): void {
+  const list = Array.isArray(rows) ? rows : [];
+  const vRow = list.find((r) => r.id === VENDOR_ROW_ID);
+  const cRow = list.find((r) => r.id === CATEGORY_ALIAS_ROW_ID);
+  vendorRegistry = parseVendorRegistry(vRow?.icon_key);
+  categoryAliases = parseCategoryAliases(cRow?.icon_key);
+}
+
+export function getCategoryAliases(): Record<string, string> {
+  return categoryAliases;
+}
+
+/** Map an old/aliased category name to its canonical id (for stale filters). */
+export function resolveCategoryAlias(name: string): string {
+  const canon = categoryAliases[normalizeVendor(name)];
+  return canon && categoryDefs.some((d) => d.id === canon) ? canon : name;
+}
+
+/**
+ * When adding a category, is the typed name a duplicate or near-duplicate of
+ * an existing one? Returns the match (with `exact` when it's the same name
+ * modulo case/spacing, otherwise a fuzzy "did you mean"), or null if it looks
+ * genuinely new. Reuses the vendor fuzzy machinery.
+ */
+export function suggestCanonicalCategory(name: string): { match: string; exact: boolean } | null {
+  const norm = normalizeVendor(name);
+  if (!norm) return null;
+  const exact = categoryDefs.find((d) => normalizeVendor(d.id) === norm);
+  if (exact) return { match: exact.id, exact: true };
+  const aliased = categoryAliases[norm];
+  if (aliased && categoryDefs.some((d) => d.id === aliased)) return { match: aliased, exact: false };
+
+  const squashed = squashVendor(name);
+  if (squashed.length < VENDOR_FUZZY_MIN_LEN) return null;
+  let best: { id: string; score: number } | null = null;
+  for (const d of categoryDefs) {
+    const candidates = [squashVendor(d.id), squashVendor(normalizeVendor(d.id).split(" ")[0])];
+    let s = 0;
+    for (const c of candidates) if (c.length >= VENDOR_FUZZY_MIN_LEN) s = Math.max(s, vendorSimilarity(squashed, c));
+    if (s >= VENDOR_FUZZY_THRESHOLD && (!best || s > best.score)) best = { id: d.id, score: s };
+  }
+  return best ? { match: best.id, exact: false } : null;
+}
+
+async function _updateEntriesCategoryByIds(ids: string[], category: string): Promise<void> {
+  // Chunk the id list so the PostgREST URL stays a sane length.
+  for (let i = 0; i < ids.length; i += 200) {
+    const slice = ids.slice(i, i + 200);
+    const { error } = await supabase.from("entries").update({ category }).in("id", slice);
+    if (error) console.error("supabase: _updateEntriesCategoryByIds", error);
+  }
+}
+
+/**
+ * Merge a duplicate category into the correct one: re-tag every entry from
+ * `fromId` to `toId`, delete the duplicate, and remember `fromId` as an alias
+ * of `toId` (so it can't be recreated by accident). Source must be a custom
+ * (deletable) category; the target can be built-in or custom. Undoable.
+ */
+export async function mergeCategories(
+  fromId: string,
+  toId: string,
+): Promise<{ ok: boolean; reason?: string; moved: number }> {
+  if (fromId === toId) return { ok: false, reason: "Pick two different categories.", moved: 0 };
+  const fromDef = categoryDefs.find((d) => d.id === fromId);
+  const toDef = categoryDefs.find((d) => d.id === toId);
+  if (!fromDef || !toDef) return { ok: false, reason: "Category not found — refresh and try again.", moved: 0 };
+  if (fromDef.builtin) {
+    return { ok: false, reason: "Built-in categories can't be merged away (use one as the target instead).", moved: 0 };
+  }
+
+  const affected = entries.filter((e) => e.category === fromId).map((e) => e.id);
+  const prevAliases = { ...categoryAliases };
+
+  // Optimistic local update.
+  entries = entries.map((e) => (e.category === fromId ? { ...e, category: toId } : e));
+  const nextAliases: Record<string, string> = { [normalizeVendor(fromId)]: toId };
+  for (const [k, v] of Object.entries(categoryAliases)) nextAliases[k] = v === fromId ? toId : v;
+  categoryAliases = nextAliases;
+  categoryDefs = categoryDefs.filter((d) => d.id !== fromId);
+  notify();
+
+  // Persist: one bulk PATCH by category, delete the def, save aliases.
+  const { error: eErr } = await supabase.from("entries").update({ category: toId }).eq("category", fromId);
+  if (eErr) {
+    console.error("supabase: mergeCategories retag", eErr);
+    entries = entries.map((e) => (affected.includes(e.id) ? { ...e, category: fromId } : e));
+    categoryAliases = prevAliases;
+    categoryDefs = [...categoryDefs, fromDef];
+    notify();
+    return { ok: false, reason: "Couldn't move the entries — check your internet and try again.", moved: 0 };
+  }
+  await supabase.from("category_defs").delete().eq("id", fromId);
+  await persistCategoryAliases();
+
+  setUndoable(`Merged “${fromId}” into “${toId}”`, async () => {
+    categoryDefs = [...categoryDefs.filter((d) => d.id !== fromId), fromDef];
+    entries = entries.map((e) => (affected.includes(e.id) ? { ...e, category: fromId } : e));
+    categoryAliases = prevAliases;
+    notify();
+    const { error } = await supabase.from("category_defs").insert({
+      id: fromDef.id,
+      tagalog: fromDef.tagalog ?? null,
+      icon_key: fromDef.iconKey,
+      builtin: false,
+      extra_hints: fromDef.extraHints ?? [],
+    });
+    if (error) {
+      console.error("supabase: undo mergeCategories", error);
+      return { ok: false, reason: "Undo failed — refresh to check." };
+    }
+    await _updateEntriesCategoryByIds(affected, fromId);
+    await persistCategoryAliases();
+    return { ok: true };
+  });
+
+  return { ok: true, moved: affected.length };
 }
 
 // ---------- VENDORS (shared canonical registry) ----------

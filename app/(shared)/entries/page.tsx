@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, ArrowUp, Check, ChevronLeft, ListChecks, Plus, Search, Wand2, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
-import { getEntries, getPcfLedger, getPersonalEntryIds, getUserById } from "@/lib/store";
+import { getEntries, getPcfLedger, getPersonalEntryIds, getUserById, resolveCategoryAlias } from "@/lib/store";
 import { entryInMonth, peso, relativeDate, toMonthKey } from "@/lib/format";
 import { staffCategoryLabel } from "@/lib/category-meta";
 import { paidFromBadgeClasses, paidFromLabel, paidFromRowClasses } from "@/lib/payment-meta";
@@ -35,7 +35,10 @@ export default function EntriesPage() {
 
   // Drilldown filters arrive via URL params from dashboard tiles and the
   // categories breakdown page. They're cleared with the "X" chip in the header.
-  const categoryFilter = searchParams.get("category");
+  // Resolve a merged/renamed tag to its canonical id, so old links & saved
+  // filters (e.g. ?category=Cleaners after it was merged) still land right.
+  const rawCategoryFilter = searchParams.get("category");
+  const categoryFilter = rawCategoryFilter ? resolveCategoryAlias(rawCategoryFilter) : null;
   const staffIdFilter = searchParams.get("staffId");
   const monthParam = searchParams.get("month"); // YYYY-MM, carried from dashboard chips
   const fromAnalytics = searchParams.get("from") === "analytics"; // drilled in from /analytics

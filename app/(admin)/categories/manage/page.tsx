@@ -8,6 +8,9 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  GitMerge,
+  Lightbulb,
+  Loader2,
   Lock,
   Plus,
   Trash2,
@@ -18,6 +21,8 @@ import {
   deleteCategoryDef,
   getCategoryDefs,
   getEntries,
+  mergeCategories,
+  suggestCanonicalCategory,
   updateCategoryHints,
 } from "@/lib/store";
 import {
@@ -57,29 +62,66 @@ export default function AdminManageCategoriesPage() {
   const [newTagalog, setNewTagalog] = useState("");
   const [newIconKey, setNewIconKey] = useState<string>(PICKABLE_ICON_KEYS[0]);
   const [formError, setFormError] = useState<string | null>(null);
+  // A near-duplicate the creation guard flagged; the admin picks "use existing"
+  // or "create anyway".
+  const [pendingDup, setPendingDup] = useState<{ match: string; exact: boolean } | null>(null);
   const [deleteError, setDeleteError] = useState<{
     id: string;
     reason: string;
   } | null>(null);
 
-  function handleAdd() {
-    setFormError(null);
-    const result = addCategoryDef({
-      id: newName,
-      tagalog: newTagalog,
-      iconKey: newIconKey,
-    });
-    if (!result) {
-      setFormError(
-        newName.trim().length === 0
-          ? "Type a name first."
-          : "A category with that name already exists.",
-      );
-      return;
-    }
+  // Merge tool state
+  const customDefs = defs.filter((d) => !d.builtin);
+  const [mergeFrom, setMergeFrom] = useState("");
+  const [mergeTo, setMergeTo] = useState("");
+  const [mergeBusy, setMergeBusy] = useState(false);
+  const [mergeNote, setMergeNote] = useState<string | null>(null);
+
+  function resetAddForm() {
     setNewName("");
     setNewTagalog("");
     setNewIconKey(PICKABLE_ICON_KEYS[0]);
+    setPendingDup(null);
+    setFormError(null);
+  }
+
+  // force=true means the admin saw the "did you mean" and chose to create anyway.
+  function handleAdd(force = false) {
+    setFormError(null);
+    if (newName.trim().length === 0) {
+      setFormError("Type a name first.");
+      return;
+    }
+    if (!force) {
+      const dup = suggestCanonicalCategory(newName);
+      if (dup) {
+        // Exact (case/spacing) match: don't allow a duplicate at all.
+        // Near match: offer to use the existing one or create anyway.
+        setPendingDup(dup);
+        return;
+      }
+    }
+    const result = addCategoryDef({ id: newName, tagalog: newTagalog, iconKey: newIconKey });
+    if (!result) {
+      setFormError("A category with that name already exists.");
+      return;
+    }
+    resetAddForm();
+  }
+
+  async function handleMerge() {
+    if (!mergeFrom || !mergeTo || mergeBusy) return;
+    setMergeBusy(true);
+    setMergeNote(null);
+    const res = await mergeCategories(mergeFrom, mergeTo);
+    setMergeBusy(false);
+    if (res.ok) {
+      setMergeNote(`Merged into “${mergeTo}” — ${res.moved} entr${res.moved === 1 ? "y" : "ies"} re-tagged.`);
+      setMergeFrom("");
+      setMergeTo("");
+    } else {
+      setMergeNote(res.reason ?? "Merge failed.");
+    }
   }
 
   function handleDelete(id: string) {
@@ -181,13 +223,114 @@ export default function AdminManageCategoriesPage() {
           {formError && (
             <p className="text-xs text-clay-500">{formError}</p>
           )}
+
+          {/* Creation-time dedupe guard */}
+          {pendingDup && (
+            <div className="rounded-lg bg-leaf-50 border border-leaf-100 p-3">
+              <p className="text-xs text-leaf-700 flex items-start gap-1.5">
+                <Lightbulb className="w-4 h-4 flex-shrink-0" />
+                {pendingDup.exact ? (
+                  <span>
+                    &ldquo;{staffCategoryLabel(pendingDup.match)}&rdquo; already exists — no need to
+                    add it again.
+                  </span>
+                ) : (
+                  <span>
+                    Did you mean{" "}
+                    <span className="font-medium">{staffCategoryLabel(pendingDup.match)}</span>?
+                    Making a near-duplicate splits the same spending across tags.
+                  </span>
+                )}
+              </p>
+              <div className="flex gap-2 mt-2">
+                <button
+                  onClick={resetAddForm}
+                  className="btn btn-sm flex-1 bg-white border-sand-200 text-ink-700"
+                >
+                  Use &ldquo;{staffCategoryLabel(pendingDup.match)}&rdquo;
+                </button>
+                {!pendingDup.exact && (
+                  <button
+                    onClick={() => handleAdd(true)}
+                    className="btn btn-sm flex-1 bg-white border-clay-200 text-clay-500"
+                  >
+                    Create &ldquo;{newName.trim()}&rdquo; anyway
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           <button
-            onClick={handleAdd}
+            onClick={() => handleAdd()}
             className="btn-primary w-full"
           >
             <Plus className="w-4 h-4" /> Add category
           </button>
         </div>
+      </section>
+
+      {/* Merge duplicates */}
+      <section className="px-5 pt-6">
+        <p className="text-sm font-medium text-ink-900 mb-1 flex items-center gap-1.5">
+          <GitMerge className="w-4 h-4 text-ink-500" /> Merge duplicate categories
+        </p>
+        <p className="text-[11px] text-ink-500 mb-2">
+          Move every entry from a duplicate tag into the correct one. The duplicate is removed and
+          remembered as an alias so it can&rsquo;t be recreated by accident. Undoable.
+        </p>
+        {mergeNote && <p className="text-xs text-leaf-600 mb-2">{mergeNote}</p>}
+        {customDefs.length === 0 ? (
+          <p className="text-xs text-ink-500">No custom categories to merge.</p>
+        ) : (
+          <div className="space-y-2.5 rounded-lg bg-white border border-sand-200 p-3">
+            <div>
+              <label htmlFor="merge-from" className="label">Merge this (duplicate)</label>
+              <select
+                id="merge-from"
+                value={mergeFrom}
+                onChange={(e) => { setMergeFrom(e.target.value); setMergeNote(null); }}
+                className="input h-10"
+              >
+                <option value="">Pick a category…</option>
+                {customDefs.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.id} · {usageById.get(d.id) ?? 0} entr{(usageById.get(d.id) ?? 0) === 1 ? "y" : "ies"}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="merge-to" className="label">…into this (keep)</label>
+              <select
+                id="merge-to"
+                value={mergeTo}
+                onChange={(e) => { setMergeTo(e.target.value); setMergeNote(null); }}
+                className="input h-10"
+              >
+                <option value="">Pick a category…</option>
+                {defs
+                  .filter((d) => d.id !== mergeFrom)
+                  .map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.id}
+                      {d.builtin ? "" : " (custom)"}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <button
+              onClick={handleMerge}
+              disabled={!mergeFrom || !mergeTo || mergeBusy}
+              className="btn-primary w-full disabled:opacity-50"
+            >
+              {mergeBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <GitMerge className="w-4 h-4" />}
+              {mergeFrom
+                ? `Merge ${usageById.get(mergeFrom) ?? 0} entr${(usageById.get(mergeFrom) ?? 0) === 1 ? "y" : "ies"}`
+                : "Merge"}
+            </button>
+          </div>
+        )}
       </section>
 
       {/* Existing categories */}
