@@ -14,8 +14,10 @@ import {
   getCategoryDefs,
   getEntries,
   getEntryById,
+  getReceiptById,
   isEntryPersonal,
   setEntryPersonal,
+  setReceiptVat,
   updateEntry,
 } from "@/lib/store";
 import { peso, toIsoDate } from "@/lib/format";
@@ -94,6 +96,11 @@ function EditEntryForm({ entry, me }: { entry: Entry; me: User }) {
   // Personal flag lives on the receipt, so it's only editable here when this
   // entry belongs to one.
   const [isPersonal, setIsPersonal] = useState(isEntryPersonal(entry.id));
+  // Receipt-level VAT (informational, already inside the printed total) —
+  // editable here so a wrong/missing VAT amount can be fixed after logging.
+  const receipt = entry.receiptId ? getReceiptById(entry.receiptId) : undefined;
+  const [hasVat, setHasVat] = useState(!!receipt?.vatAmount);
+  const [vatAmount, setVatAmount] = useState(receipt?.vatAmount ? String(receipt.vatAmount) : "");
   const [error, setError] = useState<string | null>(null);
 
   const numericQty = Number(qty) || 0;
@@ -201,6 +208,15 @@ function EditEntryForm({ entry, me }: { entry: Entry; me: User }) {
     // receipt.
     if (entry.receiptId && isPersonal !== isEntryPersonal(entry.id)) {
       void setEntryPersonal(entry.id, isPersonal, me.id);
+    }
+
+    // VAT also lives on the receipt — write only when it actually changed.
+    if (entry.receiptId) {
+      const nextVat = hasVat ? Number(vatAmount) || 0 : 0;
+      const prevVat = receipt?.vatAmount ?? 0;
+      if (Math.abs(nextVat - prevVat) > 0.005) {
+        void setReceiptVat(entry.receiptId, nextVat > 0 ? nextVat : null, me.id);
+      }
     }
 
     // Record what changed in the entry's edit history.
@@ -435,6 +451,45 @@ function EditEntryForm({ entry, me }: { entry: Entry; me: User }) {
               </p>
             </div>
           </label>
+        )}
+
+        {/* Receipt-level VAT — editable after logging so a wrong or missing
+            amount can be corrected. Saved to the shared receipt on Save. */}
+        {entry.receiptId && (
+          <div>
+            <label className="flex items-start gap-2 p-3 rounded-lg bg-sand-50 border border-sand-200 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={hasVat}
+                onChange={(e) => {
+                  setHasVat(e.target.checked);
+                  if (!e.target.checked) setVatAmount("");
+                }}
+                className="mt-0.5"
+              />
+              <div className="flex-1">
+                <p className="text-sm text-ink-900">Receipt includes VAT</p>
+                <p className="text-[11px] text-ink-500 mt-0.5">
+                  Already part of the receipt total — recorded for the bookkeeper, not deducted
+                  again. Applies to the whole receipt.
+                </p>
+              </div>
+            </label>
+            {hasVat && (
+              <div className="mt-2">
+                <label htmlFor="vatAmount" className="label">VAT amount (₱)</label>
+                <input
+                  id="vatAmount"
+                  type="text"
+                  inputMode="decimal"
+                  value={vatAmount}
+                  onChange={(e) => setVatAmount(e.target.value.replace(/[^\d.]/g, ""))}
+                  placeholder="e.g. the VAT line printed on the receipt"
+                  className="input"
+                />
+              </div>
+            )}
+          </div>
         )}
 
         {category === "Maintenance" && (

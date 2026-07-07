@@ -1772,6 +1772,163 @@ export function appendEntryHistory(id: string, record: AuditRecord): void {
   })();
 }
 
+/** Same day-of-month N months after an ISO date, clamped to month length. */
+function addMonthsClamped(dateIso: string, add: number): string {
+  const [y, m, d] = dateIso.split("-").map(Number);
+  const total = (m - 1) + add;
+  const ny = y + Math.floor(total / 12);
+  const nm = (total % 12) + 1;
+  const lastDay = new Date(ny, nm, 0).getDate();
+  return `${ny}-${String(nm).padStart(2, "0")}-${String(Math.min(d, lastDay)).padStart(2, "0")}`;
+}
+
+/**
+ * Spread a one-time expense across N consecutive months — for costs paid once
+ * but valid over a period (annual compliance fees, yearly permits, etc.).
+ *
+ * The original entry KEEPS its id, date, receipt link, photos, flags, and
+ * notes, and becomes part 1/N with total/N; N−1 sibling entries are created
+ * in the following months (same day, clamped). Because these are ordinary
+ * entries, every existing sum — monthly analytics, charts, Excel, receipt
+ * reconciliation, and the (all-time) PCF balance — stays correct with no
+ * special cases: the parts add up to exactly the original amount.
+ */
+export async function spreadEntryAcrossMonths(
+  entryId: string,
+  months: number,
+  byUserId: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  const entry = entries.find((e) => e.id === entryId);
+  if (!entry) return { ok: false, reason: "Entry not found — refresh and try again." };
+  if (!Number.isInteger(months) || months < 2 || months > 12) {
+    return { ok: false, reason: "Pick between 2 and 12 months." };
+  }
+  if (!(entry.total > 0)) return { ok: false, reason: "This entry has no amount to spread." };
+
+  // Split to the centavo: equal parts, first part absorbs the remainder so
+  // the sum is exactly the original total.
+  const cents = Math.round(entry.total * 100);
+  const baseCents = Math.floor(cents / months);
+  const firstCents = cents - baseCents * (months - 1);
+  const partTotal = (i: number) => (i === 0 ? firstCents : baseCents) / 100;
+  const partItem = (i: number) => `${entry.item} (${i + 1}/${months})`;
+
+  const now = new Date().toISOString();
+  const siblings: Entry[] = Array.from({ length: months - 1 }, (_, k) => {
+    const i = k + 1;
+    return {
+      id: `e_${Math.random().toString(36).slice(2, 10)}`,
+      date: addMonthsClamped(entry.date, i),
+      vendor: entry.vendor,
+      item: partItem(i),
+      qty: 1,
+      unitPrice: partTotal(i),
+      total: partTotal(i),
+      category: entry.category,
+      paidFrom: entry.paidFrom,
+      majorRepair: entry.majorRepair,
+      receiptId: entry.receiptId,
+      photoUrls: [],
+      loggedBy: entry.loggedBy,
+      createdAt: now,
+      flags: [],
+      notes: [],
+      history: [
+        {
+          at: now,
+          by: byUserId,
+          summary: `Part of “${entry.item}” (${peso0(entry.total)}) spread across ${months} months`,
+        },
+      ],
+    };
+  });
+
+  // Server-first: insert the siblings, then shrink the original. If the
+  // sibling insert fails nothing has changed; if the original update fails we
+  // remove the siblings again rather than leave a double-counted total.
+  const prev = { item: entry.item, qty: entry.qty, unitPrice: entry.unitPrice, total: entry.total };
+  try {
+    const { error: insErr } = await supabase.from("entries").insert(
+      siblings.map((e) => ({
+        id: e.id,
+        date: e.date,
+        vendor: e.vendor,
+        item: e.item,
+        qty: e.qty,
+        unit_price: e.unitPrice,
+        total: e.total,
+        category: e.category,
+        paid_from: e.paidFrom,
+        major_repair: e.majorRepair ?? false,
+        receipt_id: e.receiptId ?? null,
+        photo_url: serializeEntryMedia([], e.history ?? []),
+        logged_by: e.loggedBy,
+        created_at: e.createdAt,
+        flags: e.flags,
+        notes: e.notes,
+      })),
+    );
+    if (insErr) {
+      console.error("supabase: spreadEntryAcrossMonths insert", insErr);
+      return { ok: false, reason: "Couldn't save — check your internet and try again." };
+    }
+    const { error: updErr } = await supabase
+      .from("entries")
+      .update({ item: partItem(0), qty: 1, unit_price: partTotal(0), total: partTotal(0) })
+      .eq("id", entryId);
+    if (updErr) {
+      console.error("supabase: spreadEntryAcrossMonths update", updErr);
+      await supabase.from("entries").delete().in("id", siblings.map((e) => e.id));
+      return { ok: false, reason: "Couldn't save — check your internet and try again." };
+    }
+  } catch (err) {
+    console.error("supabase: spreadEntryAcrossMonths threw", err);
+    return { ok: false, reason: "No connection. Check your internet and try again." };
+  }
+
+  // Server confirmed — reflect locally.
+  for (const e of siblings) {
+    _entryMediaCache.set(e.id, { photoUrls: [], history: e.history ?? [] });
+  }
+  entries = [
+    ...siblings,
+    ...entries.map((e) =>
+      e.id === entryId
+        ? { ...e, item: partItem(0), qty: 1, unitPrice: partTotal(0), total: partTotal(0) }
+        : e,
+    ),
+  ];
+  notify();
+  appendEntryHistory(entryId, {
+    at: now,
+    by: byUserId,
+    summary: `Spread ${peso0(prev.total)} across ${months} months (this entry is part 1/${months})`,
+  });
+
+  const siblingIds = siblings.map((e) => e.id);
+  setUndoable(`Spread “${prev.item}” across ${months} months`, async () => {
+    const ok = await _hardDeleteEntries(siblingIds);
+    entries = entries.map((e) => (e.id === entryId ? { ...e, ...prev } : e));
+    notify();
+    const { error } = await supabase
+      .from("entries")
+      .update({ item: prev.item, qty: prev.qty, unit_price: prev.unitPrice, total: prev.total })
+      .eq("id", entryId);
+    if (error) {
+      console.error("supabase: undo spreadEntryAcrossMonths", error);
+      return { ok: false, reason: "Undo failed — refresh to check." };
+    }
+    return { ok };
+  });
+
+  return { ok: true };
+}
+
+/** Whole-peso display for history summaries (₱12,000 not ₱12,000.00). */
+function peso0(n: number): string {
+  return `₱${Math.round(n).toLocaleString()}`;
+}
+
 export function addNoteToEntry(
   entryId: string,
   note: Omit<Note, "id" | "createdAt">,

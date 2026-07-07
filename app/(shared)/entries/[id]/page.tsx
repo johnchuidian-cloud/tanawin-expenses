@@ -8,6 +8,7 @@ import { useParams, useRouter } from "next/navigation";
 import {
   AlertCircle,
   ArrowLeft,
+  CalendarRange,
   Check,
   History,
   ImageIcon,
@@ -41,6 +42,7 @@ import {
   resolveFlag,
   setEntryPersonal,
   setEntryPhotos,
+  spreadEntryAcrossMonths,
 } from "@/lib/store";
 import { formatDate, formatDateTime, peso } from "@/lib/format";
 import { paidFromBadgeClasses } from "@/lib/payment-meta";
@@ -78,6 +80,9 @@ export default function StaffEntryDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
   const [personalBusy, setPersonalBusy] = useState(false);
+  const [spreadOpen, setSpreadOpen] = useState(false);
+  const [spreadMonths, setSpreadMonths] = useState(12);
+  const [spreadBusy, setSpreadBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
   // Receipt photos are edited locally and committed with a manual Save, so
@@ -189,6 +194,23 @@ export default function StaffEntryDetailPage() {
   // Personal can only be toggled on a line item that's on a receipt (the flag
   // is stored there). Standalone entries don't qualify.
   const canTogglePersonal = canEdit && !!entry.receiptId;
+  // Spread: for one-time costs valid over a period (annual compliance etc.).
+  // Hidden when the entry is already a part of a spread ("(2/12)" suffix).
+  const alreadySpread = /\(\d+\/\d+\)\s*$/.test(entry.item);
+  const canSpread = canEdit && !alreadySpread && entry.total > 0;
+
+  async function handleSpread() {
+    if (!entry || !me || spreadBusy) return;
+    setSpreadBusy(true);
+    setError(null);
+    const res = await spreadEntryAcrossMonths(entry.id, spreadMonths, me.id);
+    setSpreadBusy(false);
+    if (!res.ok) {
+      setError(res.reason ?? "Couldn't spread this expense.");
+      return;
+    }
+    setSpreadOpen(false);
+  }
 
   async function handleTogglePersonal() {
     if (!entry || !me || personalBusy) return;
@@ -354,6 +376,75 @@ export default function StaffEntryDetailPage() {
             </div>
           </label>
         )}
+
+        {/* Spread a one-time cost (annual permit, compliance fee…) across
+            consecutive months so each month's reports carry its share. */}
+        {canSpread && !spreadOpen && (
+          <button
+            onClick={() => setSpreadOpen(true)}
+            className="mt-2 w-full flex items-start gap-2 p-2.5 rounded-lg bg-white border border-sand-200 hover:bg-sand-50 text-left"
+          >
+            <CalendarRange className="w-4 h-4 text-ink-500 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm text-ink-900">Spread across months</p>
+              <p className="text-[11px] text-ink-500 mt-0.5">
+                For costs paid once but valid over a period — divides {peso(entry.total)} into
+                monthly parts so each month&rsquo;s reports carry its share.
+              </p>
+            </div>
+          </button>
+        )}
+        {canSpread && spreadOpen && (
+          <div className="mt-2 p-3 rounded-lg bg-white border border-leaf-200 space-y-2">
+            <p className="text-sm font-medium text-ink-900 flex items-center gap-1.5">
+              <CalendarRange className="w-4 h-4 text-leaf-600" /> Spread across months
+            </p>
+            <div>
+              <label htmlFor="spreadMonths" className="label">How many months?</label>
+              <select
+                id="spreadMonths"
+                value={spreadMonths}
+                onChange={(e) => setSpreadMonths(Number(e.target.value))}
+                className="input h-10"
+                disabled={spreadBusy}
+              >
+                {Array.from({ length: 11 }, (_, i) => i + 2).map((n) => (
+                  <option key={n} value={n}>
+                    {n} months{n === 12 ? " (a full year)" : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <p className="text-[11px] text-ink-500">
+              {peso(Math.round((entry.total / spreadMonths) * 100) / 100, { cents: true })} per month ×{" "}
+              {spreadMonths}, starting {formatDate(entry.date, { withYear: true })}. The petty cash
+              balance and the receipt total don&rsquo;t change — only how the cost lands on each
+              month&rsquo;s reports. You can undo right after.
+            </p>
+            {error && <p className="text-xs text-clay-500">{error}</p>}
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setSpreadOpen(false); setError(null); }}
+                className="btn btn-sm flex-1"
+                disabled={spreadBusy}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSpread}
+                disabled={spreadBusy}
+                className="btn-primary flex-1 h-9 text-sm disabled:opacity-60"
+              >
+                {spreadBusy ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <CalendarRange className="w-4 h-4" />
+                )}
+                Spread over {spreadMonths} months
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Part of a multi-item receipt: the photo lives on the shared receipt
@@ -400,6 +491,9 @@ export default function StaffEntryDetailPage() {
           )}
           <p className="text-[11px] text-ink-500 mt-1">
             One of {receiptItemCount} item{receiptItemCount === 1 ? "" : "s"} logged on this receipt.
+            {!!receipt.vatAmount && (
+              <span> · includes {peso(receipt.vatAmount, { cents: true })} VAT</span>
+            )}
           </p>
           {!isGuest && (
             <>
