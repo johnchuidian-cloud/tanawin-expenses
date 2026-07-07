@@ -46,3 +46,4 @@ trigger
 2026-06-18c — bulk-correct now logs each change to entry edit history
 2026-06-18d — fix PCF balance truncating at 1000 rows (paginate loads) + manual Refresh button
 2026-06-18e — category dedupe: creation guard (did-you-mean) + merge tool + aliases
+2026-06-18f — VAT editable on entry edit form (+ shown on detail); spread one-time expense across 2-12 months
