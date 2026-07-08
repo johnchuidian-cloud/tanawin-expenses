@@ -1,22 +1,24 @@
 /**
- * Full-database backup to local JSON files.
+ * Full-database backup to local JSON files — covers BOTH Supabase projects:
  *
- * Dumps EVERY table in the shared Supabase project (Finance + Kitchen — the
- * table list is discovered from the PostgREST schema, so new tables are
- * picked up automatically) into a dated folder:
+ *   shared/ — the Finance+Kitchen project (creds from this repo's .env + .env.local)
+ *   menu/   — the Tanawin Menu project   (creds from ../tanawin-menu/.env.local,
+ *             skipped with a note if that repo isn't present on this machine)
  *
- *   C:\Users\<you>\Documents\tanawin-backups\YYYY-MM-DD_HHMM\<table>.json
+ * Table lists are discovered from each project's PostgREST schema, so new
+ * tables are picked up automatically. Snapshots land in dated folders:
  *
- * Why this exists: the apps use client-side PIN auth with RLS disabled, so
- * the anon key can modify data. These snapshots are the recovery path if
- * data is ever damaged or deleted. Keeps the 12 most recent snapshots.
+ *   C:\Users\<you>\Documents\tanawin-backups\YYYY-MM-DD_HHMM\<project>\<table>.json
+ *
+ * Why this exists: Finance/Kitchen use client-side PIN auth with RLS disabled,
+ * so the anon key can modify data; Menu holds live order records. These
+ * snapshots are the recovery path if data is ever damaged or deleted.
+ * Keeps the 12 most recent snapshots.
  *
  * Run manually:  node scripts/backup-db.mjs
- * Scheduled:     a Windows Task Scheduler job runs scripts/backup-db.cmd weekly.
+ * Scheduled:     the "Tanawin DB Backup" Windows task runs scripts/backup-db.cmd weekly.
  *
- * Secrets: reads NEXT_PUBLIC_SUPABASE_URL from .env and
- * SUPABASE_SERVICE_ROLE_KEY from .env.local (gitignored). Nothing sensitive
- * lives in this file.
+ * Secrets: read from env files only (all gitignored). Nothing sensitive here.
  */
 
 import { readFileSync, mkdirSync, writeFileSync, readdirSync, rmSync, existsSync } from "node:fs";
@@ -26,26 +28,33 @@ import { homedir } from "node:os";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-function readEnv(file, key) {
-  const p = join(repoRoot, file);
-  if (!existsSync(p)) return undefined;
-  for (const line of readFileSync(p, "utf8").split(/\r?\n/)) {
+function readEnv(absPath, key) {
+  if (!existsSync(absPath)) return undefined;
+  for (const line of readFileSync(absPath, "utf8").split(/\r?\n/)) {
     const m = line.match(/^([A-Z_]+)=(.*)$/);
     if (m && m[1] === key) return m[2].replace(/^["']|["']$/g, "").trim();
   }
 }
 
-const URL_ = readEnv(".env", "NEXT_PUBLIC_SUPABASE_URL");
-const KEY = readEnv(".env.local", "SUPABASE_SERVICE_ROLE_KEY");
-if (!URL_ || !KEY) {
-  console.error("Missing NEXT_PUBLIC_SUPABASE_URL (.env) or SUPABASE_SERVICE_ROLE_KEY (.env.local)");
-  process.exit(1);
-}
-const H = { apikey: KEY, Authorization: `Bearer ${KEY}` };
+const menuRepo = join(repoRoot, "..", "..", "tanawin-menu");
+const PROJECTS = [
+  {
+    name: "shared", // Finance + Kitchen (one Supabase project)
+    url: readEnv(join(repoRoot, ".env"), "NEXT_PUBLIC_SUPABASE_URL"),
+    key: readEnv(join(repoRoot, ".env.local"), "SUPABASE_SERVICE_ROLE_KEY"),
+    required: true,
+  },
+  {
+    name: "menu", // Tanawin Menu (its own Supabase project)
+    url: readEnv(join(menuRepo, ".env.local"), "SUPABASE_URL"),
+    key: readEnv(join(menuRepo, ".env.local"), "SUPABASE_SERVICE_ROLE_KEY"),
+    required: false,
+  },
+];
 
 // Discover every table from the PostgREST OpenAPI root.
-async function listTables() {
-  const res = await fetch(`${URL_}/rest/v1/`, { headers: H });
+async function listTables(url, headers) {
+  const res = await fetch(`${url}/rest/v1/`, { headers });
   if (!res.ok) throw new Error(`schema fetch failed: HTTP ${res.status}`);
   const spec = await res.json();
   return Object.keys(spec.paths ?? {})
@@ -55,7 +64,7 @@ async function listTables() {
 
 // Fetch all rows, paging past PostgREST's 1000-row cap. Tries to order by a
 // stable column for consistent pages; falls back to unordered.
-async function dumpTable(table) {
+async function dumpTable(url, headers, table) {
   const orders = ["id", "created_at", "key", "item_key", "finance_entry_id", null];
   for (const col of orders) {
     const rows = [];
@@ -63,8 +72,8 @@ async function dumpTable(table) {
     let failed = false;
     for (let from = 0; ; from += size) {
       const q = col ? `${table}?select=*&order=${col}` : `${table}?select=*`;
-      const res = await fetch(`${URL_}/rest/v1/${q}`, {
-        headers: { ...H, Range: `${from}-${from + size - 1}`, "Range-Unit": "items" },
+      const res = await fetch(`${url}/rest/v1/${q}`, {
+        headers: { ...headers, Range: `${from}-${from + size - 1}`, "Range-Unit": "items" },
       });
       if (!res.ok) { failed = true; break; } // bad order column — try next
       const page = await res.json();
@@ -80,28 +89,49 @@ const stamp = new Date();
 const pad = (n) => String(n).padStart(2, "0");
 const folderName = `${stamp.getFullYear()}-${pad(stamp.getMonth() + 1)}-${pad(stamp.getDate())}_${pad(stamp.getHours())}${pad(stamp.getMinutes())}`;
 const backupRoot = join(homedir(), "Documents", "tanawin-backups");
-const outDir = join(backupRoot, folderName);
-mkdirSync(outDir, { recursive: true });
+const snapshotDir = join(backupRoot, folderName);
 
-const tables = await listTables();
-console.log(`Backing up ${tables.length} tables to ${outDir}`);
-let totalRows = 0;
-for (const t of tables) {
+let grandTotal = 0;
+const manifest = { at: stamp.toISOString(), projects: {} };
+
+for (const p of PROJECTS) {
+  if (!p.url || !p.key) {
+    const msg = `${p.name}: credentials not found — skipped`;
+    if (p.required) { console.error(msg); process.exitCode = 1; }
+    else console.warn(msg);
+    manifest.projects[p.name] = "skipped (no credentials)";
+    continue;
+  }
+  const headers = { apikey: p.key, Authorization: `Bearer ${p.key}` };
+  const outDir = join(snapshotDir, p.name);
+  mkdirSync(outDir, { recursive: true });
   try {
-    const rows = await dumpTable(t);
-    writeFileSync(join(outDir, `${t}.json`), JSON.stringify(rows));
-    totalRows += rows.length;
-    console.log(`  ✓ ${t}: ${rows.length} rows`);
+    const tables = await listTables(p.url, headers);
+    console.log(`[${p.name}] backing up ${tables.length} tables`);
+    let projectRows = 0;
+    for (const t of tables) {
+      try {
+        const rows = await dumpTable(p.url, headers, t);
+        writeFileSync(join(outDir, `${t}.json`), JSON.stringify(rows));
+        projectRows += rows.length;
+        console.log(`  ✓ ${t}: ${rows.length} rows`);
+      } catch (err) {
+        console.error(`  ✗ ${t}: ${err.message}`);
+        process.exitCode = 1;
+      }
+    }
+    manifest.projects[p.name] = { tables: tables.length, rows: projectRows };
+    grandTotal += projectRows;
   } catch (err) {
-    console.error(`  ✗ ${t}: ${err.message}`);
+    console.error(`[${p.name}] ${err.message}`);
+    manifest.projects[p.name] = `failed: ${err.message}`;
     process.exitCode = 1;
   }
 }
-writeFileSync(
-  join(outDir, "_manifest.json"),
-  JSON.stringify({ at: stamp.toISOString(), tables: tables.length, totalRows }, null, 2),
-);
-console.log(`Done: ${totalRows} rows total.`);
+
+mkdirSync(snapshotDir, { recursive: true });
+writeFileSync(join(snapshotDir, "_manifest.json"), JSON.stringify(manifest, null, 2));
+console.log(`Done: ${grandTotal} rows total.`);
 
 // Retention: keep the 12 most recent snapshot folders.
 const snapshots = readdirSync(backupRoot, { withFileTypes: true })
