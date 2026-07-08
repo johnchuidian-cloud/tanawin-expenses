@@ -86,7 +86,19 @@ export interface User {
   id: string;
   name: string;
   role: Role;
-  pin: string; // 4-digit PIN, mocked for v0; replaced by Supabase Auth later
+  /**
+   * LEGACY plaintext 4-digit PIN. Empty string once the account has been
+   * migrated to a hashed PIN (see pinHash) — new/changed PINs are always
+   * stored hashed. Kept for backward compat with unmigrated rows.
+   */
+  pin: string;
+  /**
+   * SHA-256 hex of the 4-digit PIN (stored as `ph` in the users.pin JSON
+   * blob). When present, login compares hashes and the plaintext PIN is
+   * never stored. Note: a 4-digit space is brute-forceable offline — this
+   * protects against casual reading of the table, not a determined attacker.
+   */
+  pinHash?: string;
   /**
    * SHA-256 hash of the admin's recovery code (forgot-PIN failsafe), or
    * undefined when none is set. Stored packed inside the users.pin column

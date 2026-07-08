@@ -255,9 +255,12 @@ export async function refreshFromSupabase(): Promise<void> {
 
 /**
  * The users.pin column is overloaded the same way entries.photo_url is
- * (no DDL possible, so no new columns): a plain "1234" for plain users, or
- * a JSON blob '{"v":1,"pin":"1234","rc":"<sha256 hex>","vr":"guest"}' when
- * extra facts must ride along:
+ * (no DDL possible, so no new columns): a plain "1234" for legacy users, or
+ * a JSON blob when extra facts must ride along:
+ *   '{"v":1,"ph":"<sha256 of PIN>","rc":"<sha256 hex>","vr":"guest"}'
+ *   - ph: SHA-256 hex of the 4-digit PIN. Since 2026-07-08 all new/changed
+ *     PINs are stored hashed (never plaintext); a legacy `pin` field is
+ *     still read for unmigrated rows.
  *   - rc: hash of the admin's forgot-PIN recovery code (plaintext shown
  *     once at generation, never stored).
  *   - vr: view-role override. The DB role column has a CHECK constraint
@@ -266,6 +269,7 @@ export async function refreshFromSupabase(): Promise<void> {
  */
 function parseUserPin(raw: unknown): {
   pin: string;
+  pinHash?: string;
   recoveryHash?: string;
   roleOverride?: User["role"];
 } {
@@ -273,9 +277,10 @@ function parseUserPin(raw: unknown): {
   const s = raw.trim();
   if (s.startsWith("{")) {
     try {
-      const o = JSON.parse(s) as { pin?: unknown; rc?: unknown; vr?: unknown };
+      const o = JSON.parse(s) as { pin?: unknown; ph?: unknown; rc?: unknown; vr?: unknown };
       return {
         pin: typeof o.pin === "string" ? o.pin : "",
+        pinHash: typeof o.ph === "string" ? o.ph : undefined,
         recoveryHash: typeof o.rc === "string" ? o.rc : undefined,
         roleOverride: o.vr === "guest" ? "guest" : undefined,
       };
@@ -286,15 +291,30 @@ function parseUserPin(raw: unknown): {
   return { pin: s };
 }
 
-function serializeUserPin(
-  pin: string,
-  recoveryHash?: string,
-  roleOverride?: User["role"],
-): string {
-  if (!recoveryHash && !roleOverride) return pin;
+/**
+ * Pack the auth facts back into the users.pin column. When a pinHash is
+ * present the plaintext PIN is never written; the legacy plain form is kept
+ * only for rows that still carry a plaintext PIN and nothing else.
+ */
+function serializeUserAuth(auth: {
+  pin?: string;
+  pinHash?: string;
+  recoveryHash?: string;
+  roleOverride?: User["role"];
+}): string {
+  const { pin, pinHash, recoveryHash, roleOverride } = auth;
+  if (pinHash) {
+    return JSON.stringify({
+      v: 1,
+      ph: pinHash,
+      ...(recoveryHash ? { rc: recoveryHash } : {}),
+      ...(roleOverride === "guest" ? { vr: "guest" } : {}),
+    });
+  }
+  if (!recoveryHash && !roleOverride) return pin ?? "";
   return JSON.stringify({
     v: 1,
-    pin,
+    pin: pin ?? "",
     ...(recoveryHash ? { rc: recoveryHash } : {}),
     ...(roleOverride === "guest" ? { vr: "guest" } : {}),
   });
@@ -312,6 +332,7 @@ function mapUser(row: Record<string, unknown>): User {
     name: row.name as string,
     role: auth.roleOverride ?? (row.role as User["role"]),
     pin: auth.pin,
+    pinHash: auth.pinHash,
     recoveryHash: auth.recoveryHash,
   };
 }
@@ -1489,11 +1510,28 @@ export function getUsers(): User[] {
 export function getUserById(id: string): User | undefined {
   return users.find((u) => u.id === id);
 }
-export function authenticateByPin(name: string, pin: string): User | null {
+/**
+ * Is this PIN already taken by another user? Returns the other user's name,
+ * or null when free. Compares hashed and legacy-plaintext PINs alike (two
+ * users sharing a PIN would make name+PIN login ambiguous).
+ */
+export async function pinInUse(excludeUserId: string, pin: string): Promise<string | null> {
+  const hash = await sha256Hex(pin);
   const u = users.find(
-    (x) => x.name.toLowerCase() === name.toLowerCase() && x.pin === pin,
+    (x) => x.id !== excludeUserId && (x.pinHash === hash || (x.pin !== "" && x.pin === pin)),
   );
-  return u ?? null;
+  return u?.name ?? null;
+}
+
+export async function authenticateByPin(name: string, pin: string): Promise<User | null> {
+  const u = users.find((x) => x.name.toLowerCase() === name.toLowerCase());
+  if (!u) return null;
+  // Hashed PIN (current format) — compare digests. Legacy plaintext rows
+  // (not yet migrated) compare directly.
+  if (u.pinHash) {
+    return (await sha256Hex(pin)) === u.pinHash ? u : null;
+  }
+  return u.pin !== "" && u.pin === pin ? u : null;
 }
 
 /**
@@ -1501,20 +1539,22 @@ export function authenticateByPin(name: string, pin: string): User | null {
  * are replaced — admin renames the slot and resets the PIN.
  * Role (admin/staff) is intentionally NOT editable here.
  */
-export function updateUser(
+export async function updateUser(
   id: string,
   patch: { name?: string; pin?: string },
-): void {
+): Promise<void> {
   const cur = users.find((u) => u.id === id);
   if (!cur) return;
   const trimmedName = patch.name?.trim();
   const trimmedPin = patch.pin?.trim();
+  // New/changed PINs are stored hashed, never plaintext.
+  const newPinHash = trimmedPin ? await sha256Hex(trimmedPin) : undefined;
   users = users.map((u) =>
     u.id === id
       ? {
           ...u,
           ...(trimmedName ? { name: trimmedName } : {}),
-          ...(trimmedPin ? { pin: trimmedPin } : {}),
+          ...(newPinHash ? { pin: "", pinHash: newPinHash } : {}),
         }
       : u,
   );
@@ -1524,8 +1564,12 @@ export function updateUser(
   if (trimmedName) update.name = trimmedName;
   // The pin column may carry the packed recovery hash and the guest role
   // override — preserve both when the PIN changes (see parseUserPin).
-  if (trimmedPin) {
-    update.pin = serializeUserPin(trimmedPin, cur.recoveryHash, roleOverrideFor(cur));
+  if (newPinHash) {
+    update.pin = serializeUserAuth({
+      pinHash: newPinHash,
+      recoveryHash: cur.recoveryHash,
+      roleOverride: roleOverrideFor(cur),
+    });
   }
   if (Object.keys(update).length === 0) return;
 
@@ -1573,7 +1617,14 @@ export async function generateRecoveryCode(userId: string): Promise<string | nul
 
   const { error } = await supabase
     .from("users")
-    .update({ pin: serializeUserPin(cur.pin, hash, roleOverrideFor(cur)) })
+    .update({
+      pin: serializeUserAuth({
+        pin: cur.pin,
+        pinHash: cur.pinHash,
+        recoveryHash: hash,
+        roleOverride: roleOverrideFor(cur),
+      }),
+    })
     .eq("id", userId);
   if (error) {
     console.error("supabase: generateRecoveryCode", error);
@@ -1600,7 +1651,10 @@ export async function resetPinWithRecoveryCode(
   if (!/^\d{4}$/.test(newPin)) {
     return { ok: false, reason: "The new PIN must be exactly 4 digits." };
   }
-  const collision = users.find((u) => u.id !== userId && u.pin === newPin);
+  const newPinHash = await sha256Hex(newPin);
+  const collision = users.find(
+    (u) => u.id !== userId && (u.pinHash === newPinHash || (u.pin !== "" && u.pin === newPin)),
+  );
   if (collision) {
     return { ok: false, reason: "That PIN is already used by someone else — pick another." };
   }
@@ -1609,15 +1663,17 @@ export async function resetPinWithRecoveryCode(
     return { ok: false, reason: "Recovery code doesn't match. Check for typos." };
   }
 
-  // Success: set the new PIN and burn the code (one-time use).
+  // Success: set the new PIN (hashed) and burn the code (one-time use).
   users = users.map((u) =>
-    u.id === userId ? { ...u, pin: newPin, recoveryHash: undefined } : u,
+    u.id === userId ? { ...u, pin: "", pinHash: newPinHash, recoveryHash: undefined } : u,
   );
   notify();
 
   const { error } = await supabase
     .from("users")
-    .update({ pin: serializeUserPin(newPin, undefined, roleOverrideFor(cur)) })
+    .update({
+      pin: serializeUserAuth({ pinHash: newPinHash, roleOverride: roleOverrideFor(cur) }),
+    })
     .eq("id", userId);
   if (error) {
     console.error("supabase: resetPinWithRecoveryCode", error);

@@ -33,9 +33,10 @@ export function homePathFor(role: Role): string {
   return "/entries";
 }
 
-export function login(name: string, pin: string): User | null {
+export async function login(name: string, pin: string): Promise<User | null> {
   if (typeof window === "undefined") return null;
-  const user = authenticateByPin(name, pin);
+  // Async because PIN comparison hashes the input (PINs are stored hashed).
+  const user = await authenticateByPin(name, pin);
   if (user) {
     sessionStorage.setItem(STORAGE_KEY, user.id);
     window.dispatchEvent(new Event("tanawin:auth"));

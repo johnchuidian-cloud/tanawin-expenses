@@ -18,11 +18,15 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ArrowLeft, Check, KeyRound, Loader2, X as XIcon } from "lucide-react";
 import { useStoreTick } from "@/lib/useStoreTick";
-import { generateRecoveryCode, getUsers, updateUser } from "@/lib/store";
+import { generateRecoveryCode, getUsers, pinInUse, updateUser } from "@/lib/store";
 
+/**
+ * PINs are stored hashed (2026-07-08), so the current PIN can't be shown.
+ * The PIN field is therefore "set a new PIN": blank = keep the current one.
+ */
 interface Draft {
   name: string;
-  pin: string;
+  pin: string; // new PIN to set; "" = unchanged
 }
 
 export default function ManageUsersPage() {
@@ -30,10 +34,10 @@ export default function ManageUsersPage() {
   const router = useRouter();
   const users = getUsers();
 
-  // One draft per user. Pristine = matches current saved values.
+  // One draft per user. Pristine = name matches, PIN field empty (unchanged).
   const initialDrafts = useMemo(() => {
     const map: Record<string, Draft> = {};
-    for (const u of users) map[u.id] = { name: u.name, pin: u.pin };
+    for (const u of users) map[u.id] = { name: u.name, pin: "" };
     return map;
   }, [users]);
   const [drafts, setDrafts] = useState<Record<string, Draft>>(initialDrafts);
@@ -68,7 +72,7 @@ export default function ManageUsersPage() {
   function syncDraft(id: string) {
     setDrafts((cur) => ({
       ...cur,
-      [id]: { name: users.find((u) => u.id === id)?.name ?? "", pin: users.find((u) => u.id === id)?.pin ?? "" },
+      [id]: { name: users.find((u) => u.id === id)?.name ?? "", pin: "" },
     }));
   }
 
@@ -80,30 +84,31 @@ export default function ManageUsersPage() {
     const u = users.find((x) => x.id === id);
     const d = draftFor(id);
     if (!u) return false;
-    return d.name.trim() !== u.name || d.pin.trim() !== u.pin;
+    return d.name.trim() !== u.name || d.pin.trim() !== "";
   }
 
-  function validate(id: string): string | null {
+  async function handleSave(id: string) {
     const d = draftFor(id);
-    if (!d.name.trim()) return "Name can't be blank.";
-    if (!d.pin.trim()) return "PIN can't be blank.";
-    if (!/^\d{4}$/.test(d.pin.trim())) return "PIN must be 4 digits.";
-    // PIN uniqueness — two users can't share the same PIN or login is ambiguous.
-    const collision = users.find(
-      (u) => u.id !== id && u.pin === d.pin.trim(),
-    );
-    if (collision) return `PIN already used by ${collision.name}.`;
-    return null;
-  }
-
-  function handleSave(id: string) {
-    const err = validate(id);
-    if (err) {
-      window.alert(err);
+    if (!d.name.trim()) {
+      window.alert("Name can't be blank.");
       return;
     }
-    const d = draftFor(id);
-    updateUser(id, { name: d.name.trim(), pin: d.pin.trim() });
+    const newPin = d.pin.trim();
+    if (newPin) {
+      if (!/^\d{4}$/.test(newPin)) {
+        window.alert("PIN must be 4 digits.");
+        return;
+      }
+      // PIN uniqueness — two users can't share a PIN or login is ambiguous.
+      // Compared via hashes since stored PINs aren't readable.
+      const takenBy = await pinInUse(id, newPin);
+      if (takenBy) {
+        window.alert(`PIN already used by ${takenBy}.`);
+        return;
+      }
+    }
+    void updateUser(id, { name: d.name.trim(), ...(newPin ? { pin: newPin } : {}) });
+    syncDraft(id);
     setSavedFlash(id);
     setTimeout(() => setSavedFlash((cur) => (cur === id ? null : cur)), 2000);
   }
@@ -141,7 +146,7 @@ export default function ManageUsersPage() {
             />
           </label>
           <label className="block">
-            <span className="text-[11px] text-ink-500">4-digit PIN</span>
+            <span className="text-[11px] text-ink-500">New PIN (blank = keep)</span>
             <input
               type="text"
               inputMode="numeric"
@@ -209,7 +214,8 @@ export default function ManageUsersPage() {
         <div className="flex-1 min-w-0">
           <p className="text-base font-medium text-ink-900">Manage staff</p>
           <p className="text-[11px] text-ink-500">
-            Rename a slot or issue a new PIN when staff are replaced
+            Rename a slot or issue a new PIN when staff are replaced. PINs are
+            stored securely and can&rsquo;t be viewed — only replaced.
           </p>
         </div>
       </div>

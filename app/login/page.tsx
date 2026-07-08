@@ -26,9 +26,9 @@ export default function LoginPage() {
     ? users.find((u) => u.name.toLowerCase() === selectedName.toLowerCase())
     : undefined;
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (!selectedName) return;
-    const user = login(selectedName, pin);
+    const user = await login(selectedName, pin);
     if (!user) {
       setError("PIN incorrect — try again");
       setPin("");
@@ -65,7 +65,7 @@ export default function LoginPage() {
       return;
     }
     // PIN is updated and the code is used up — log straight in.
-    const user = login(selectedUser.name, newPin);
+    const user = await login(selectedUser.name, newPin);
     if (user) {
       window.alert(
         "PIN updated and you're logged in.\n\nYour recovery code has been used up — generate a new one in Manage staff and write it down.",
@@ -257,8 +257,8 @@ export default function LoginPage() {
                 setError(null);
                 if (v.length === 4) {
                   // Auto-submit when 4 digits entered
-                  setTimeout(() => {
-                    const u = login(selectedName, v);
+                  setTimeout(async () => {
+                    const u = await login(selectedName, v);
                     if (!u) {
                       setError("PIN incorrect — try again");
                       setPin("");
