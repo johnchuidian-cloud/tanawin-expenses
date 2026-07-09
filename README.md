@@ -18,6 +18,8 @@ A mobile-first expense tracker built for a real bed-and-breakfast in the Philipp
 
 - **Multi-item purchases** — one receipt photo, many tagged line items, with live reconciliation against the printed total.
 - **Pooled petty cash (PCF)** — staff report top-ups, the owner approves or rejects them with a reason, and every expense draws the balance down automatically.
+- **Reconciliation that survives edits** — once a month is closed against a physical cash count, correcting or back-dating an expense in that month no longer disturbs today's balance (the adjustment is absorbed and logged); the owner can also reconcile the balance to the cash actually counted in one tap.
+- **Search** — find any entry or top-up by vendor, item, tag, or date (e.g. "june", "jun 1", "2026-06"), reachable in one tap from every role's nav.
 - **Roles** — **Admin** (full control), **Staff** (log and discuss their own entries), and a view-only **Guest** for accountants and family.
 - **Review & notifications** — flagged entries (duplicates, arithmetic slips, outliers) and rejected top-ups surface in a review queue and a header notification bell, so nothing waiting on someone gets missed.
 - **Receipt tools** — replace a blurry photo, add a missing item to an existing receipt, split or delete line items (with an audit trail), and mark a receipt complete when part of it was a personal, non-PCF purchase.
