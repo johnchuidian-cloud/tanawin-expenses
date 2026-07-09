@@ -1740,8 +1740,20 @@ export function addEntry(entry: Omit<Entry, "id" | "createdAt">): Entry {
 }
 
 export function updateEntry(id: string, updates: Partial<Entry>): void {
+  const before = entries.find((e) => e.id === id);
   entries = entries.map((e) => (e.id === id ? { ...e, ...updates } : e));
   notify();
+
+  // Editing an entry from a closed (pre-reset) period must not shift today's
+  // PCF balance — it's already folded into the reset figure. If this edit
+  // changed the entry's drawdown contribution, nudge the reset to absorb it.
+  if (before && (updates.total !== undefined || updates.paidFrom !== undefined)) {
+    void freezeClosedPeriodDelta(
+      before.createdAt,
+      pcfDrawContribution(before),
+      pcfDrawContribution(entries.find((e) => e.id === id)),
+    );
+  }
 
   // NOTE: photos and history live in the packed `photo_url` blob and are
   // written only via setEntryPhotos / appendEntryHistory — never here — so a
@@ -1860,6 +1872,17 @@ export async function spreadEntryAcrossMonths(
     return { ok: false, reason: "Pick between 2 and 12 months." };
   }
   if (!(entry.total > 0)) return { ok: false, reason: "This entry has no amount to spread." };
+
+  // Don't spread an entry from a period already reconciled: splitting it
+  // rewrites month totals inside a closed period and creates siblings that
+  // would move the current balance. Closed periods stay frozen.
+  const spreadReset = latestPcfReset();
+  if (spreadReset && entry.createdAt && entry.createdAt <= (spreadReset.createdAt ?? "")) {
+    return {
+      ok: false,
+      reason: `This entry is from a period already reconciled (closed on ${spreadReset.date}), so it can't be spread.`,
+    };
+  }
 
   // Split to the centavo: equal parts, first part absorbs the remainder so
   // the sum is exactly the original total.
@@ -2630,6 +2653,9 @@ export async function deleteEntry(
     .maybeSingle();
   const rawPhotoUrl = (pre?.photo_url ?? null) as string | null;
   const snapshot = entry;
+  // Drawdown this entry contributes right now — captured before we mutate the
+  // receipt's personal set, so a closed-period deletion can be neutralised.
+  const drawBefore = pcfDrawContribution(entry);
 
   entries = entries.filter((e) => e.id !== id);
   _entryMediaCache.delete(id);
@@ -2685,6 +2711,10 @@ export async function deleteEntry(
     if (stErr) console.error("supabase: deleteEntry receipt status", stErr);
   }
 
+  // If this entry was in a closed (pre-reset) period, removing its drawdown
+  // would inflate the current balance. Freeze the period by nudging the reset.
+  await freezeClosedPeriodDelta(snapshot.createdAt, drawBefore, 0);
+
   // Undo = re-create the entry exactly, and roll the receipt back to its
   // pre-deletion status + deletion log.
   setUndoable(`Removed “${snapshot.item}”`, async () => {
@@ -2716,6 +2746,8 @@ export async function deleteEntry(
       { ...snapshot, photoUrls: media.photoUrls, photoUrl: media.photoUrls[0], history: media.history },
       ...entries,
     ];
+    // Restore the closed-period freeze we applied on delete (reverse the nudge).
+    await freezeClosedPeriodDelta(snapshot.createdAt, 0, drawBefore);
     if (receiptId && priorReceipt) {
       receipts = receipts.map((r) =>
         r.id === receiptId
@@ -2786,6 +2818,61 @@ export function getPcfBalance(): number {
   return topUps - getPcfDrawdownTotal();
 }
 
+/**
+ * The most recent "balance reset" ledger row, if any. clearPcfBalance folds
+ * every entry that existed at reset time into one offsetting figure; reset
+ * rows carry the `p_clear_` id prefix. Used to know which entries are in a
+ * closed (reconciled) period.
+ */
+function latestPcfReset(): PcfLedgerEntry | undefined {
+  return pcfLedger
+    .filter((p) => p.kind === "top-up" && p.status === "approved" && p.id.startsWith("p_clear_"))
+    .reduce<PcfLedgerEntry | undefined>(
+      (latest, p) => (!latest || (p.createdAt ?? "") > (latest.createdAt ?? "") ? p : latest),
+      undefined,
+    );
+}
+
+/** How much this entry currently adds to the PCF drawdown (0 if not PCF / personal). */
+function pcfDrawContribution(e: Entry | undefined | null): number {
+  if (!e) return 0;
+  return e.paidFrom === "pcf" && !isEntryPersonal(e.id) ? e.total : 0;
+}
+
+/**
+ * Keep closed periods frozen. When a PCF entry that predates the most recent
+ * balance reset changes how much it contributes to the drawdown (edited total,
+ * funding source, personal flag, or deletion), that change would otherwise
+ * move the *current* balance — the entry is already folded into the reset
+ * figure, so the all-time sum would count the change twice (this is the bug
+ * that let a deleted January expense inflate July's petty cash). We cancel it
+ * by nudging the reset figure by the same delta, leaving today's balance
+ * untouched. Post-reset entries are left alone — they legitimately move the
+ * balance — and if no reset has been booked there's nothing to protect.
+ *
+ * The reset baseline is keyed on when the reset ROW was created, not the
+ * entry's (often back-dated) expense date: the reset captured whatever rows
+ * existed at reset time regardless of the date written on them.
+ */
+async function freezeClosedPeriodDelta(
+  entryCreatedAt: string | undefined,
+  oldContribution: number,
+  newContribution: number,
+): Promise<void> {
+  const reset = latestPcfReset();
+  if (!reset || !entryCreatedAt || entryCreatedAt > (reset.createdAt ?? "")) return;
+  const delta = Math.round((newContribution - oldContribution) * 100) / 100;
+  if (Math.abs(delta) < 0.005) return;
+  const newAmount = Math.round((reset.amount + delta) * 100) / 100;
+  pcfLedger = pcfLedger.map((p) => (p.id === reset.id ? { ...p, amount: newAmount } : p));
+  notify();
+  const { error } = await supabase
+    .from("pcf_ledger")
+    .update({ amount: newAmount })
+    .eq("id", reset.id);
+  if (error) console.error("supabase: freezeClosedPeriodDelta", error);
+}
+
 /** Is this entry flagged as a personal purchase (excluded from PCF)? */
 export function isEntryPersonal(entryId: string): boolean {
   return receipts.some((r) => r.personalEntryIds?.includes(entryId));
@@ -2832,6 +2919,16 @@ export async function setEntryPersonal(
     notify();
     return { ok: false, reason: "Couldn't save — check your internet and try again." };
   }
+
+  // Toggling personal on a closed-period PCF entry changes its drawdown; keep
+  // that period frozen so today's balance doesn't move.
+  const wasPersonal = cur.includes(entryId);
+  await freezeClosedPeriodDelta(
+    entry.createdAt,
+    entry.paidFrom === "pcf" && !wasPersonal ? entry.total : 0,
+    entry.paidFrom === "pcf" && !isPersonal ? entry.total : 0,
+  );
+
   appendEntryHistory(entryId, {
     at: new Date().toISOString(),
     by: byUserId,

@@ -48,3 +48,4 @@ trigger
 2026-06-18e — category dedupe: creation guard (did-you-mean) + merge tool + aliases
 2026-06-18f — VAT editable on entry edit form (+ shown on detail); spread one-time expense across 2-12 months
 2026-06-18g — hashed PINs (login compares digests; manage-staff sets-new-only) + weekly DB backup script
+2026-06-18h — PCF: freeze closed periods (edits/deletes to pre-reset entries auto-adjust the reset so the current balance never moves)
