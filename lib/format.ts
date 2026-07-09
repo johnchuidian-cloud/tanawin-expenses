@@ -63,6 +63,36 @@ export function relativeDate(iso: string): string {
   return formatDate(iso);
 }
 
+/**
+ * A lowercase bag of common ways this date could be typed into search, so a
+ * query like "june", "jun 17", "2026-06", "6/17", "2026", or "today" all match
+ * the same entry. Joined into one string for a simple substring test.
+ */
+export function dateSearchText(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  const long = d.toLocaleString("en-US", { month: "long" }).toLowerCase(); // june
+  const short = d.toLocaleString("en-US", { month: "short" }).toLowerCase(); // jun
+  const weekday = d.toLocaleString("en-US", { weekday: "long" }).toLowerCase();
+  return [
+    iso, // 2026-06-17
+    `${y}-${String(m).padStart(2, "0")}`, // 2026-06
+    String(y),
+    long,
+    short,
+    `${long} ${day}`, // june 17
+    `${short} ${day}`, // jun 17
+    `${long} ${y}`, // june 2026
+    `${m}/${day}`, // 6/17
+    `${String(m).padStart(2, "0")}/${String(day).padStart(2, "0")}`, // 06/17
+    weekday,
+    relativeDate(iso).toLowerCase(), // today / yesterday / "jun 17"
+  ].join(" ");
+}
+
 /** Returns YYYY-MM-DD for a Date, in local TZ. */
 export function toIsoDate(d: Date = new Date()): string {
   const yyyy = d.getFullYear();

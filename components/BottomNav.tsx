@@ -13,6 +13,7 @@ import {
   Menu,
   PieChart,
   PlusCircle,
+  Search,
   Tags,
   Wallet,
   X,
@@ -28,6 +29,7 @@ interface NavItem {
 
 const STAFF_NAV: NavItem[] = [
   { href: "/home", label: "Home", icon: Home },
+  { href: "/entries?focus=search", label: "Search", icon: Search },
   { href: "/entries", label: "Entries", icon: List },
   { href: "/new", label: "New", icon: PlusCircle },
   { href: "/categories", label: "Tags", icon: Tags },
@@ -39,6 +41,7 @@ const STAFF_NAV: NavItem[] = [
 // analytics page (their main reason to be here).
 const GUEST_NAV: NavItem[] = [
   { href: "/entries", label: "Entries", icon: List },
+  { href: "/entries?focus=search", label: "Search", icon: Search },
   { href: "/categories", label: "Tags", icon: Tags },
   { href: "/analytics", label: "Analytics", icon: PieChart },
 ];
@@ -51,6 +54,7 @@ const GUEST_NAV: NavItem[] = [
 // live behind the hamburger menu.
 const ADMIN_NAV: NavItem[] = [
   { href: "/dashboard", label: "Home", icon: LayoutDashboard },
+  { href: "/entries?focus=search", label: "Search", icon: Search },
   { href: "/pcf", label: "PCF", icon: Wallet },
   { href: "/new", label: "New", icon: PlusCircle },
   { href: "/categories", label: "Tags", icon: Tags },

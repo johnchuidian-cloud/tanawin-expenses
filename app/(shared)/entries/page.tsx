@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, ArrowUp, Check, ChevronLeft, ListChecks, Plus, Search, Wand2, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { getEntries, getPcfLedger, getPersonalEntryIds, getUserById, resolveCategoryAlias } from "@/lib/store";
-import { entryInMonth, peso, relativeDate, toMonthKey } from "@/lib/format";
+import { dateSearchText, entryInMonth, peso, relativeDate, toMonthKey } from "@/lib/format";
 import { staffCategoryLabel } from "@/lib/category-meta";
 import { paidFromBadgeClasses, paidFromLabel, paidFromRowClasses } from "@/lib/payment-meta";
 import { MonthChips, type MonthScope } from "@/components/MonthChips";
@@ -47,6 +47,13 @@ export default function EntriesPage() {
   const [filter, setFilter] = useState<Filter>("all");
   const [monthScope, setMonthScope] = useState<MonthScope>(monthParam ?? "all");
   const [query, setQuery] = useState("");
+
+  // Arriving from the nav "Search" shortcut (/entries?focus=search) drops the
+  // cursor straight into the search box so any role can start typing at once.
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (searchParams.get("focus") === "search") searchInputRef.current?.focus();
+  }, [searchParams]);
 
   // Bulk-correction (admin): pick several entries and fix a field across all of
   // them at once — see components/BulkCorrectModal.tsx.
@@ -107,7 +114,9 @@ export default function EntriesPage() {
         return (
           e.vendor.toLowerCase().includes(q) ||
           e.item.toLowerCase().includes(q) ||
-          e.category.toLowerCase().includes(q)
+          e.category.toLowerCase().includes(q) ||
+          staffCategoryLabel(e.category).toLowerCase().includes(q) ||
+          dateSearchText(e.date).includes(q)
         );
       })
       .map((entry) => ({ kind: "expense" as const, date: entry.date, entry }));
@@ -128,7 +137,8 @@ export default function EntriesPage() {
           "topup".includes(q) ||
           String(t.amount).includes(q) ||
           (t.note ?? "").toLowerCase().includes(q) ||
-          reporter.toLowerCase().includes(q)
+          reporter.toLowerCase().includes(q) ||
+          dateSearchText(t.date).includes(q)
         );
       })
       .map((topup) => ({ kind: "topup" as const, date: topup.date, topup }));
@@ -246,12 +256,23 @@ export default function EntriesPage() {
         <div className="relative">
           <Search className="w-4 h-4 text-ink-300 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
+            ref={searchInputRef}
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search vendor, item, category…"
-            className="input pl-9"
+            placeholder="Search vendor, item, tag, or date…"
+            className="input pl-9 pr-9"
           />
+          {query && (
+            <button
+              type="button"
+              onClick={() => setQuery("")}
+              aria-label="Clear search"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-300 hover:text-ink-700"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 
