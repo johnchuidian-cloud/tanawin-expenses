@@ -3015,6 +3015,65 @@ export async function setEntryPersonal(
 }
 
 /**
+ * Attach a receipt row to an entry that doesn't have one yet, so receipt-level
+ * details (VAT, personal flag) can be recorded retroactively — e.g. on old
+ * imported entries logged before receipts were tracked. Builds a single-item
+ * receipt from the entry itself (same vendor/date, printed total = the entry's
+ * total, so it's reconciled by construction) and links it. No-op returning the
+ * existing id when the entry already has a receipt. Persists the receipt first,
+ * then the entry's receipt_id (the FK requires that order).
+ */
+export async function ensureEntryReceipt(
+  entryId: string,
+  capturedBy: string,
+): Promise<{ ok: boolean; receiptId?: string; reason?: string }> {
+  const entry = entries.find((e) => e.id === entryId);
+  if (!entry) return { ok: false, reason: "Entry not found — refresh and try again." };
+  if (entry.receiptId) return { ok: true, receiptId: entry.receiptId };
+
+  const receipt: Receipt = {
+    id: `r_${Math.random().toString(36).slice(2, 10)}`,
+    vendor: entry.vendor,
+    date: entry.date,
+    photoUrl: "",
+    totalTyped: entry.total,
+    capturedBy,
+    status: "reconciled",
+  };
+  const ocr = serializeReceiptOcrFor(receipt);
+
+  const { error: rErr } = await supabase.from("receipts").insert({
+    id: receipt.id,
+    vendor: receipt.vendor,
+    date: receipt.date,
+    photo_url: receipt.photoUrl,
+    ocr_text: ocr,
+    total_typed: receipt.totalTyped,
+    captured_by: receipt.capturedBy,
+    status: receipt.status,
+  });
+  if (rErr) {
+    console.error("supabase: ensureEntryReceipt receipt", rErr);
+    return { ok: false, reason: "Couldn't create the receipt — check your internet and try again." };
+  }
+  const { error: eErr } = await supabase
+    .from("entries")
+    .update({ receipt_id: receipt.id })
+    .eq("id", entryId);
+  if (eErr) {
+    console.error("supabase: ensureEntryReceipt link", eErr);
+    await supabase.from("receipts").delete().eq("id", receipt.id); // don't orphan it
+    return { ok: false, reason: "Couldn't attach the receipt — check your internet and try again." };
+  }
+
+  _receiptPhotoCache.set(receipt.id, "");
+  receipts = [receipt, ...receipts];
+  entries = entries.map((e) => (e.id === entryId ? { ...e, receiptId: receipt.id } : e));
+  notify();
+  return { ok: true, receiptId: receipt.id };
+}
+
+/**
  * Set (or clear, with null) the VAT amount already included in a receipt's
  * printed total. Informational only — no effect on PCF or reconciliation.
  */
