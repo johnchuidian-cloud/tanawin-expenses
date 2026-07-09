@@ -55,3 +55,4 @@ trigger
 2026-06-18l — Reconcile PCF: choose lock-only (carry balance) vs lock+reset-to-0, instead of always zeroing
 2026-06-18m — Nav: pin Search to the bottom bar for every role (guest already inline; staff/admin now Home·Search·New·Notes·Menu)
 2026-06-18n — Entry edit: VAT + personal now available on receipt-less (old imported) entries — attaches a receipt on save via ensureEntryReceipt
+2026-06-18o — Closed-period freeze now keys on expense DATE and also absorbs newly-added backdated expenses (forgotten old PCF spend no longer disrupts current balance)

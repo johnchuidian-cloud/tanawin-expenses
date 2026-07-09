@@ -1793,7 +1793,7 @@ export function updateEntry(id: string, updates: Partial<Entry>): void {
   // changed the entry's drawdown contribution, nudge the reset to absorb it.
   if (before && (updates.total !== undefined || updates.paidFrom !== undefined)) {
     void freezeClosedPeriodDelta(
-      before.createdAt,
+      before.date,
       pcfDrawContribution(before),
       pcfDrawContribution(entries.find((e) => e.id === id)),
       { summary: `Edited “${before.item}” (${shortDate(before.date)}) in a closed period` },
@@ -2344,6 +2344,20 @@ export async function addPurchase(input: {
   entries = [...created, ...entries];
   notify();
 
+  // If this expense is dated into an already-closed (reconciled) month — a
+  // forgotten old purchase being recorded now — its cash was already counted
+  // at reconciliation, so adding it must NOT move the current balance. Absorb
+  // its PCF drawdown into the reset (freezeClosedPeriodDelta no-ops for normal
+  // current-month purchases). Sum only the PCF, non-personal line items.
+  const pcfClosedSum = created.reduce(
+    (s, e, i) => s + (e.paidFrom === "pcf" && !input.items[i].isPersonal ? e.total : 0),
+    0,
+  );
+  await freezeClosedPeriodDelta(input.date, 0, pcfClosedSum, {
+    summary: `Recorded ${peso0(pcfClosedSum)} of ${receipt.vendor} expenses dated ${shortDate(input.date)} (a closed period) — already reflected in the reconciliation`,
+    by: input.capturedBy,
+  });
+
   // Undo = delete the whole purchase (entries first for FK, then receipt).
   const createdIds = created.map((e) => e.id);
   setUndoable(
@@ -2358,6 +2372,11 @@ export async function addPurchase(input: {
       receipts = receipts.filter((r) => r.id !== receipt.id);
       _receiptPhotoCache.delete(receipt.id);
       notify();
+      // Reverse the closed-period absorption applied on add, if any.
+      await freezeClosedPeriodDelta(input.date, pcfClosedSum, 0, {
+        summary: `Undid ${peso0(pcfClosedSum)} of ${receipt.vendor} expenses dated ${shortDate(input.date)} (closed period)`,
+        by: input.capturedBy,
+      });
       return { ok };
     },
   );
@@ -2508,12 +2527,27 @@ export async function addItemsToReceipt(input: {
       if (error) console.error("supabase: addItemsToReceipt status", error);
     });
 
+  // Items inherit the receipt's date; if that receipt sits in a closed month,
+  // absorb their PCF drawdown into the reset so today's balance isn't moved.
+  const apcfClosedSum = created.reduce(
+    (s, e, i) => s + (e.paidFrom === "pcf" && !input.items[i].isPersonal ? e.total : 0),
+    0,
+  );
+  await freezeClosedPeriodDelta(receipt.date, 0, apcfClosedSum, {
+    summary: `Recorded ${peso0(apcfClosedSum)} of ${receipt.vendor} expenses dated ${shortDate(receipt.date)} (a closed period) — already reflected in the reconciliation`,
+    by: input.capturedBy,
+  });
+
   // Undo = delete the just-added items and restore the receipt's prior status.
   const addedIds = created.map((e) => e.id);
   setUndoable(
     `Added ${created.length} item${created.length === 1 ? "" : "s"} · ${receipt.vendor}`,
     async () => {
       const ok = await _hardDeleteEntries(addedIds);
+      await freezeClosedPeriodDelta(receipt.date, apcfClosedSum, 0, {
+        summary: `Undid ${peso0(apcfClosedSum)} of ${receipt.vendor} expenses dated ${shortDate(receipt.date)} (closed period)`,
+        by: input.capturedBy,
+      });
       receipts = receipts.map((r) =>
         r.id === receipt.id ? { ...r, status: priorStatus, personalEntryIds: priorPersonal } : r,
       );
@@ -2765,7 +2799,7 @@ export async function deleteEntry(
 
   // If this entry was in a closed (pre-reset) period, removing its drawdown
   // would inflate the current balance. Freeze the period by nudging the reset.
-  await freezeClosedPeriodDelta(snapshot.createdAt, drawBefore, 0, {
+  await freezeClosedPeriodDelta(snapshot.date, drawBefore, 0, {
     summary: `Deleted “${snapshot.item}” (${shortDate(snapshot.date)}) from a closed period`,
     by: byUserId ?? snapshot.loggedBy,
   });
@@ -2802,7 +2836,7 @@ export async function deleteEntry(
       ...entries,
     ];
     // Restore the closed-period freeze we applied on delete (reverse the nudge).
-    await freezeClosedPeriodDelta(snapshot.createdAt, 0, drawBefore, {
+    await freezeClosedPeriodDelta(snapshot.date, 0, drawBefore, {
       summary: `Restored “${snapshot.item}” (${shortDate(snapshot.date)})`,
       by: byUserId ?? snapshot.loggedBy,
     });
@@ -2898,28 +2932,30 @@ function pcfDrawContribution(e: Entry | undefined | null): number {
 }
 
 /**
- * Keep closed periods frozen. When a PCF entry that predates the most recent
- * balance reset changes how much it contributes to the drawdown (edited total,
- * funding source, personal flag, or deletion), that change would otherwise
- * move the *current* balance — the entry is already folded into the reset
- * figure, so the all-time sum would count the change twice (this is the bug
- * that let a deleted January expense inflate July's petty cash). We cancel it
- * by nudging the reset figure by the same delta, leaving today's balance
- * untouched. Post-reset entries are left alone — they legitimately move the
- * balance — and if no reset has been booked there's nothing to protect.
+ * Keep closed periods frozen. Whenever an expense whose DATE falls in an
+ * already-reconciled month changes how much it contributes to the PCF drawdown
+ * — edited total, funding source, personal flag, deletion, OR a brand-new
+ * back-dated expense being added — that change would otherwise move the
+ * *current* balance. But a reconciliation counted the physical cash as of the
+ * reset date, so anything dated on/before it is already reflected; letting it
+ * move today's balance double-counts (a deleted January expense inflated July;
+ * a newly-recorded April expense drove it negative). We cancel the effect by
+ * nudging the reset figure by the same delta, leaving today's balance untouched.
+ * Expenses dated after the reset are left alone (they legitimately move the
+ * balance); with no reset booked there's nothing to protect.
  *
- * The reset baseline is keyed on when the reset ROW was created, not the
- * entry's (often back-dated) expense date: the reset captured whatever rows
- * existed at reset time regardless of the date written on them.
+ * Keyed on the expense DATE vs the reset's date — i.e. which month is closed —
+ * not on when the row was created. A forgotten expense added today but dated
+ * into a closed month must be frozen just like one that existed at reset time.
  */
 async function freezeClosedPeriodDelta(
-  entryCreatedAt: string | undefined,
+  entryDate: string | undefined,
   oldContribution: number,
   newContribution: number,
   log?: { summary: string; by?: string },
 ): Promise<void> {
   const reset = latestPcfReset();
-  if (!reset || !entryCreatedAt || entryCreatedAt > (reset.createdAt ?? "")) return;
+  if (!reset || !entryDate || entryDate > (reset.date ?? "")) return;
   const delta = Math.round((newContribution - oldContribution) * 100) / 100;
   if (Math.abs(delta) < 0.005) return;
   const newAmount = Math.round((reset.amount + delta) * 100) / 100;
@@ -2995,7 +3031,7 @@ export async function setEntryPersonal(
   // that period frozen so today's balance doesn't move.
   const wasPersonal = cur.includes(entryId);
   await freezeClosedPeriodDelta(
-    entry.createdAt,
+    entry.date,
     entry.paidFrom === "pcf" && !wasPersonal ? entry.total : 0,
     entry.paidFrom === "pcf" && !isPersonal ? entry.total : 0,
     {
