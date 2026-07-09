@@ -479,6 +479,22 @@ export default function AdminDashboardPage() {
               deleting any history.
             </p>
 
+            <div className="mt-3 rounded-lg bg-sand-50 border border-sand-200 px-3 py-2.5 text-[11px] leading-relaxed text-ink-600">
+              <span className="font-medium text-ink-800">What closing a month does:</span>{" "}
+              it settles everything up to this point against the cash you actually
+              have on hand. Afterwards you can still fix or delete older expenses in
+              a closed month — those corrections stay in the records but{" "}
+              <span className="font-medium text-ink-700">won&rsquo;t change the current
+              balance</span> (the reset quietly absorbs them, and each one is listed
+              under &ldquo;Reset adjustments&rdquo; on the PCF page). A newly-added
+              expense you forgot still lowers the balance normally.
+              <br />
+              <span className="text-ink-400">
+                This is different from <span className="font-medium">Refresh</span>,
+                which only reloads the latest numbers and changes nothing.
+              </span>
+            </div>
+
             <div className="mt-4">
               <label htmlFor="clearMonth" className="label">
                 Which month are you closing?
