@@ -53,3 +53,4 @@ trigger
 2026-06-18j — PCF reset-adjustment log: closed-period nudges now recorded (PcfAdjustment) and shown on the PCF page
 2026-06-18k — Dashboard: explain in the reset modal what "closing a month" does vs Refresh, and that closed-month edits are absorbed + logged
 2026-06-18l — Reconcile PCF: choose lock-only (carry balance) vs lock+reset-to-0, instead of always zeroing
+2026-06-18m — Nav: pin Search to the bottom bar for every role (guest already inline; staff/admin now Home·Search·New·Notes·Menu)

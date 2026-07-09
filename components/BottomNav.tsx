@@ -50,7 +50,7 @@ const GUEST_NAV: NavItem[] = [
 // in her nav too. Rejected sits next to Review since they're sibling
 // queues — pending vs. needs-follow-up. Tags surfaces the category
 // breakdown + admin's manage button. The bar got crowded at eight items,
-// so only the pinned trio (Home/New/Notes) stays on the bar; the rest
+// so only the pinned items (Home/Search/New/Notes) stay on the bar; the rest
 // live behind the hamburger menu.
 const ADMIN_NAV: NavItem[] = [
   { href: "/dashboard", label: "Home", icon: LayoutDashboard },
@@ -64,10 +64,11 @@ const ADMIN_NAV: NavItem[] = [
   { href: "/gallery", label: "Gallery", icon: ImageIcon },
 ];
 
-// These three stay on the bottom bar at all times; everything else for the
-// role is reachable through the expanded menu. Matched by label so each
-// role's own "Home" target (admin /dashboard vs. staff /home) is respected.
-const PINNED_LABELS = new Set(["Home", "New", "Notes"]);
+// These stay on the bottom bar at all times; everything else for the role is
+// reachable through the expanded menu. Matched by label so each role's own
+// "Home" target (admin /dashboard vs. staff /home) is respected. Search is
+// pinned so every role can jump straight to it without opening the menu.
+const PINNED_LABELS = new Set(["Home", "Search", "New", "Notes"]);
 
 const COL_CLASS: Record<number, string> = {
   2: "grid-cols-2",
@@ -111,9 +112,9 @@ export default function BottomNav({ role }: { role: Role }) {
 
   const pinned = items.filter((item) => PINNED_LABELS.has(item.label));
 
-  // Roles with none of the pinned items (guests) keep the simple inline bar —
-  // there's nothing to pin and the list is short enough not to crowd.
-  if (pinned.length === 0) {
+  // Guests have a short nav (Entries/Search/Tags/Analytics), so they keep the
+  // simple inline bar with everything visible — no hamburger needed.
+  if (role === "guest") {
     const colClass = COL_CLASS[items.length] ?? "grid-cols-4";
     return (
       <nav className="sticky bottom-0 left-0 right-0 z-30 bg-white border-t border-sand-200">
