@@ -52,3 +52,4 @@ trigger
 2026-06-18i — Search: date matching + tag-label match in entries search, focused Search entry point in all role navs
 2026-06-18j — PCF reset-adjustment log: closed-period nudges now recorded (PcfAdjustment) and shown on the PCF page
 2026-06-18k — Dashboard: explain in the reset modal what "closing a month" does vs Refresh, and that closed-month edits are absorbed + logged
+2026-06-18l — Reconcile PCF: choose lock-only (carry balance) vs lock+reset-to-0, instead of always zeroing

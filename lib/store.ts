@@ -3124,38 +3124,37 @@ export function rejectPcfTopUp(
 }
 
 /**
- * Admin: zero out the PCF balance by booking an offsetting "top-up" entry.
+ * Admin: reconcile the PCF by booking a `p_clear_` marker entry. This marker
+ * is what "closes" a period — everything created up to it becomes settled, so
+ * later edits to those expenses are absorbed by it (see freezeClosedPeriodDelta)
+ * rather than moving the current balance.
  *
- * Doesn't delete any history — instead inserts a single approved ledger
- * entry equal to whatever amount is needed to bring balance to 0. Used at
- * reconciliation time when the admin has verified cash on hand and wants
- * the books to start fresh from a known state.
+ * Two modes (`zero`):
+ *   - zero: true  → also reset the balance to ₱0, by sizing the marker to
+ *                   offset the current balance (start fresh from a known state).
+ *   - zero: false → LOCK ONLY: the marker's amount is ₱0, so the balance is
+ *                   carried forward unchanged. Closes the month without zeroing
+ *                   the running float.
+ * Either way the marker anchors the closed-period freeze; nothing is deleted.
  *
- * `date` is the day the reconciliation entry is booked on. The admin picks
- * which month they're closing, so a reset run in early June to close out
- * May lands the entry in May (dated to the last day of that month) instead
- * of polluting June's totals. Defaults to today when omitted.
- *
- * If the balance is already 0 (within rounding), this is a no-op.
+ * `date` is the day the marker is booked on. The admin picks which month
+ * they're closing, so a run in early June to close May lands the entry in May
+ * (dated to the last day of that month). Defaults to today when omitted.
  */
 export function clearPcfBalance(
   adminId: string,
-  opts?: { date?: string; note?: string },
+  opts?: { date?: string; note?: string; zero?: boolean },
 ): void {
+  const zero = opts?.zero ?? true;
   const currentBalance = getPcfBalance();
-  if (Math.abs(currentBalance) < 0.005) return;
 
-  // To bring balance to 0, we need a top-up of -currentBalance.
-  // PcfLedgerEntry.amount is non-negative, so we flip sign + kind: when the
-  // balance is negative (drawdowns > top-ups), insert a positive top-up.
-  // When positive (top-ups > drawdowns), the offset would need to be a
-  // drawdown — but the prototype's only real shortfall scenario is the
-  // negative case, so we keep it as a top-up of `-balance` and let the
-  // sign on `amount` carry the meaning. Supabase column is numeric and
-  // happy with either.
-  const amount = -currentBalance;
+  // Reset-to-zero books a top-up of -balance (amount sign carries the meaning;
+  // the Supabase numeric column is happy with either sign). Lock-only books a
+  // ₱0 marker so the balance carries forward untouched. Both anchor the freeze.
+  const amount = zero ? -currentBalance : 0;
   const now = new Date().toISOString();
   const datePart = opts?.date?.trim() || now.slice(0, 10);
+  const carried = `₱${currentBalance.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const full: PcfLedgerEntry = {
     id: `p_clear_${Math.random().toString(36).slice(2, 10)}`,
     kind: "top-up",
@@ -3166,7 +3165,9 @@ export function clearPcfBalance(
     status: "approved",
     note:
       opts?.note?.trim() ||
-      `Balance reset by admin — reconciled to ₱0 on ${datePart}`,
+      (zero
+        ? `Balance reset by admin — reconciled to ₱0 on ${datePart}`
+        : `Period locked by admin on ${datePart} — balance ${carried} carried forward`),
     createdAt: now,
   };
   pcfLedger = [full, ...pcfLedger];

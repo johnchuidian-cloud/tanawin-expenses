@@ -28,9 +28,13 @@ export default function AdminDashboardPage() {
   // closing so the offsetting entry lands in that month's books rather than
   // always today's — clearing May's float in early June shouldn't dump a
   // reconciliation line into June.
-  const [clearedFlash, setClearedFlash] = useState(false);
+  const [clearedFlash, setClearedFlash] = useState("");
   const [clearOpen, setClearOpen] = useState(false);
   const [clearMonth, setClearMonth] = useState(thisMonth);
+  // Reconcile mode: lock the period only (carry the balance forward) vs also
+  // reset to ₱0. Defaults to lock-only so closing a month never zeroes the
+  // float unless the admin explicitly asks.
+  const [clearZero, setClearZero] = useState(false);
 
   // Months the admin can close: every month that has a PCF drawdown or a
   // ledger entry, plus the current month, newest first.
@@ -52,15 +56,16 @@ export default function AdminDashboardPage() {
 
   function openClear() {
     setClearMonth(thisMonth);
+    setClearZero(false);
     setClearOpen(true);
   }
 
   function confirmClear() {
     if (!me) return;
-    clearPcfBalance(me.id, { date: bookingDateFor(clearMonth) });
+    clearPcfBalance(me.id, { date: bookingDateFor(clearMonth), zero: clearZero });
     setClearOpen(false);
-    setClearedFlash(true);
-    setTimeout(() => setClearedFlash(false), 3000);
+    setClearedFlash(clearZero ? "Balance reset to ₱0" : "Period locked · balance carried forward");
+    setTimeout(() => setClearedFlash(""), 3000);
   }
 
   // Scope drives every "this month" section on the page. Default to the
@@ -215,12 +220,12 @@ export default function AdminDashboardPage() {
             className="inline-flex items-center gap-1.5 px-3 h-8 rounded-lg bg-white border border-leaf-200 text-leaf-600 text-xs font-medium hover:bg-leaf-100 transition-colors"
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            Clear PCF balance
-            <span className="text-[10px] text-leaf-600/70">(reset to ₱0)</span>
+            Reconcile balance
+            <span className="text-[10px] text-leaf-600/70">(lock / reset)</span>
           </button>
           {clearedFlash && (
             <span className="text-[11px] text-leaf-600 inline-flex items-center gap-1 animate-pulse">
-              ✓ Saved — other devices need a refresh to see this
+              ✓ {clearedFlash} — other devices need a refresh to see this
             </span>
           )}
         </div>
@@ -461,7 +466,7 @@ export default function AdminDashboardPage() {
             <div className="flex items-start justify-between gap-3 mb-3">
               <div className="flex items-center gap-2">
                 <RotateCcw className="w-4 h-4 text-leaf-600" />
-                <p className="text-base font-medium text-ink-900">Clear PCF balance</p>
+                <p className="text-base font-medium text-ink-900">Reconcile petty cash</p>
               </div>
               <button
                 onClick={() => setClearOpen(false)}
@@ -475,8 +480,8 @@ export default function AdminDashboardPage() {
             <p className="text-sm text-ink-700">
               Current balance is{" "}
               <span className="font-medium text-ink-900">{peso(balance)}</span>. This
-              books a reconciliation entry that resets the balance to ₱0 without
-              deleting any history.
+              closes the chosen month and books a reconciliation entry — no history
+              is deleted. Choose whether to keep the balance or reset it to ₱0.
             </p>
 
             <div className="mt-3 rounded-lg bg-sand-50 border border-sand-200 px-3 py-2.5 text-[11px] leading-relaxed text-ink-600">
@@ -513,7 +518,7 @@ export default function AdminDashboardPage() {
                 ))}
               </select>
               <p className="text-[11px] text-ink-500 mt-1.5">
-                The reset entry will be dated{" "}
+                The reconciliation entry will be dated{" "}
                 <span className="font-medium text-ink-700">
                   {formatDate(bookingDateFor(clearMonth), { withYear: true })}
                 </span>
@@ -521,6 +526,48 @@ export default function AdminDashboardPage() {
                   ? " (today)."
                   : " (last day of that month)."}
               </p>
+            </div>
+
+            {/* Lock-only vs lock-and-zero. Both close the month; only the second
+                zeroes the running balance. */}
+            <div className="mt-4 space-y-2">
+              <button
+                type="button"
+                onClick={() => setClearZero(false)}
+                aria-pressed={!clearZero}
+                className={
+                  "w-full text-left rounded-lg border px-3 py-2.5 transition-colors " +
+                  (!clearZero
+                    ? "border-leaf-400 bg-leaf-50 ring-1 ring-leaf-400"
+                    : "border-sand-200 bg-white hover:bg-sand-50")
+                }
+              >
+                <p className="text-sm font-medium text-ink-900">
+                  Lock the balance{" "}
+                  <span className="font-normal text-ink-500">· keep {peso(balance)}</span>
+                </p>
+                <p className="text-[11px] text-ink-500 mt-0.5">
+                  Closes the month and carries the current balance forward.
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setClearZero(true)}
+                aria-pressed={clearZero}
+                className={
+                  "w-full text-left rounded-lg border px-3 py-2.5 transition-colors " +
+                  (clearZero
+                    ? "border-leaf-400 bg-leaf-50 ring-1 ring-leaf-400"
+                    : "border-sand-200 bg-white hover:bg-sand-50")
+                }
+              >
+                <p className="text-sm font-medium text-ink-900">
+                  Lock and reset to ₱0
+                </p>
+                <p className="text-[11px] text-ink-500 mt-0.5">
+                  Closes the month and starts the balance fresh from ₱0.
+                </p>
+              </button>
             </div>
 
             <div className="flex gap-2 mt-5">
@@ -535,7 +582,7 @@ export default function AdminDashboardPage() {
                 className="btn-primary flex-1 h-9 text-sm"
               >
                 <RotateCcw className="w-4 h-4" />
-                Reset to ₱0
+                {clearZero ? "Lock & reset to ₱0" : "Lock balance"}
               </button>
             </div>
           </div>
