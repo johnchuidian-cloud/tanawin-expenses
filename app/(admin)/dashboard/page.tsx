@@ -31,10 +31,11 @@ export default function AdminDashboardPage() {
   const [clearedFlash, setClearedFlash] = useState("");
   const [clearOpen, setClearOpen] = useState(false);
   const [clearMonth, setClearMonth] = useState(thisMonth);
-  // Reconcile mode: lock the period only (carry the balance forward) vs also
-  // reset to ₱0. Defaults to lock-only so closing a month never zeroes the
-  // float unless the admin explicitly asks.
-  const [clearZero, setClearZero] = useState(false);
+  // Reconcile mode: "lock" carries the balance forward, "count" reconciles to
+  // the physically-counted cash, "zero" resets to ₱0. Defaults to lock-only so
+  // closing a month never changes the float unless the admin explicitly asks.
+  const [clearMode, setClearMode] = useState<"lock" | "count" | "zero">("lock");
+  const [countAmount, setCountAmount] = useState("");
 
   // Months the admin can close: every month that has a PCF drawdown or a
   // ledger entry, plus the current month, newest first.
@@ -56,15 +57,27 @@ export default function AdminDashboardPage() {
 
   function openClear() {
     setClearMonth(thisMonth);
-    setClearZero(false);
+    setClearMode("lock");
+    setCountAmount("");
     setClearOpen(true);
   }
 
+  const countNum = Number(countAmount);
+  const countValid = countAmount.trim() !== "" && Number.isFinite(countNum) && countNum >= 0;
+
   function confirmClear() {
     if (!me) return;
-    clearPcfBalance(me.id, { date: bookingDateFor(clearMonth), zero: clearZero });
+    if (clearMode === "count" && !countValid) return;
+    const target = clearMode === "lock" ? balance : clearMode === "zero" ? 0 : countNum;
+    clearPcfBalance(me.id, { date: bookingDateFor(clearMonth), targetBalance: target });
     setClearOpen(false);
-    setClearedFlash(clearZero ? "Balance reset to ₱0" : "Period locked · balance carried forward");
+    setClearedFlash(
+      clearMode === "lock"
+        ? "Period locked · balance carried forward"
+        : clearMode === "zero"
+          ? "Balance reset to ₱0"
+          : `Balance reconciled to ${peso(target)}`,
+    );
     setTimeout(() => setClearedFlash(""), 3000);
   }
 
@@ -481,7 +494,8 @@ export default function AdminDashboardPage() {
               Current balance is{" "}
               <span className="font-medium text-ink-900">{peso(balance)}</span>. This
               closes the chosen month and books a reconciliation entry — no history
-              is deleted. Choose whether to keep the balance or reset it to ₱0.
+              is deleted. Keep the balance, reconcile it to the cash you counted, or
+              reset it to ₱0.
             </p>
 
             <div className="mt-3 rounded-lg bg-sand-50 border border-sand-200 px-3 py-2.5 text-[11px] leading-relaxed text-ink-600">
@@ -528,46 +542,77 @@ export default function AdminDashboardPage() {
               </p>
             </div>
 
-            {/* Lock-only vs lock-and-zero. Both close the month; only the second
-                zeroes the running balance. */}
+            {/* Three ways to close: keep the balance, reconcile to counted
+                cash, or reset to ₱0. All book the same reconciliation marker. */}
             <div className="mt-4 space-y-2">
-              <button
-                type="button"
-                onClick={() => setClearZero(false)}
-                aria-pressed={!clearZero}
-                className={
-                  "w-full text-left rounded-lg border px-3 py-2.5 transition-colors " +
-                  (!clearZero
-                    ? "border-leaf-400 bg-leaf-50 ring-1 ring-leaf-400"
-                    : "border-sand-200 bg-white hover:bg-sand-50")
-                }
-              >
-                <p className="text-sm font-medium text-ink-900">
-                  Lock the balance{" "}
-                  <span className="font-normal text-ink-500">· keep {peso(balance)}</span>
-                </p>
-                <p className="text-[11px] text-ink-500 mt-0.5">
-                  Closes the month and carries the current balance forward.
-                </p>
-              </button>
-              <button
-                type="button"
-                onClick={() => setClearZero(true)}
-                aria-pressed={clearZero}
-                className={
-                  "w-full text-left rounded-lg border px-3 py-2.5 transition-colors " +
-                  (clearZero
-                    ? "border-leaf-400 bg-leaf-50 ring-1 ring-leaf-400"
-                    : "border-sand-200 bg-white hover:bg-sand-50")
-                }
-              >
-                <p className="text-sm font-medium text-ink-900">
-                  Lock and reset to ₱0
-                </p>
-                <p className="text-[11px] text-ink-500 mt-0.5">
-                  Closes the month and starts the balance fresh from ₱0.
-                </p>
-              </button>
+              {(
+                [
+                  {
+                    key: "lock",
+                    title: (
+                      <>
+                        Lock the balance{" "}
+                        <span className="font-normal text-ink-500">· keep {peso(balance)}</span>
+                      </>
+                    ),
+                    desc: "Closes the month and carries the current balance forward.",
+                  },
+                  {
+                    key: "count",
+                    title: <>Reconcile to counted cash</>,
+                    desc: "Type the amount actually in the box; the balance snaps to it.",
+                  },
+                  {
+                    key: "zero",
+                    title: <>Lock and reset to ₱0</>,
+                    desc: "Closes the month and starts the balance fresh from ₱0.",
+                  },
+                ] as const
+              ).map((opt) => {
+                const active = clearMode === opt.key;
+                return (
+                  <div key={opt.key}>
+                    <button
+                      type="button"
+                      onClick={() => setClearMode(opt.key)}
+                      aria-pressed={active}
+                      className={
+                        "w-full text-left rounded-lg border px-3 py-2.5 transition-colors " +
+                        (active
+                          ? "border-leaf-400 bg-leaf-50 ring-1 ring-leaf-400"
+                          : "border-sand-200 bg-white hover:bg-sand-50")
+                      }
+                    >
+                      <p className="text-sm font-medium text-ink-900">{opt.title}</p>
+                      <p className="text-[11px] text-ink-500 mt-0.5">{opt.desc}</p>
+                    </button>
+                    {opt.key === "count" && active && (
+                      <div className="mt-2">
+                        <label htmlFor="countAmount" className="label">
+                          Cash counted in the box (₱)
+                        </label>
+                        <input
+                          id="countAmount"
+                          type="text"
+                          inputMode="decimal"
+                          autoFocus
+                          value={countAmount}
+                          onChange={(e) => setCountAmount(e.target.value.replace(/[^\d.]/g, ""))}
+                          placeholder="e.g. 489.45"
+                          className="input"
+                        />
+                        {countValid && (
+                          <p className="text-[11px] text-ink-500 mt-1">
+                            Balance will change from{" "}
+                            <span className="font-medium text-ink-700">{peso(balance)}</span> to{" "}
+                            <span className="font-medium text-ink-700">{peso(countNum)}</span>.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             <div className="flex gap-2 mt-5">
@@ -579,10 +624,17 @@ export default function AdminDashboardPage() {
               </button>
               <button
                 onClick={confirmClear}
-                className="btn-primary flex-1 h-9 text-sm"
+                disabled={clearMode === "count" && !countValid}
+                className="btn-primary flex-1 h-9 text-sm disabled:opacity-50"
               >
                 <RotateCcw className="w-4 h-4" />
-                {clearZero ? "Lock & reset to ₱0" : "Lock balance"}
+                {clearMode === "lock"
+                  ? "Lock balance"
+                  : clearMode === "zero"
+                    ? "Lock & reset to ₱0"
+                    : countValid
+                      ? `Set to ${peso(countNum)}`
+                      : "Reconcile"}
               </button>
             </div>
           </div>

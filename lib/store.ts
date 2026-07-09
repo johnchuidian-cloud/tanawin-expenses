@@ -3238,18 +3238,29 @@ export function rejectPcfTopUp(
  */
 export function clearPcfBalance(
   adminId: string,
-  opts?: { date?: string; note?: string; zero?: boolean },
+  opts?: { date?: string; note?: string; targetBalance?: number },
 ): void {
-  const zero = opts?.zero ?? true;
   const currentBalance = getPcfBalance();
+  // The marker brings the balance to `targetBalance`. Defaults to ₱0 (classic
+  // reset). Callers pass the current balance for a lock-only close, or a counted
+  // cash figure to reconcile the books to what's physically in the box.
+  const target = opts?.targetBalance ?? 0;
 
-  // Reset-to-zero books a top-up of -balance (amount sign carries the meaning;
-  // the Supabase numeric column is happy with either sign). Lock-only books a
-  // ₱0 marker so the balance carries forward untouched. Both anchor the freeze.
-  const amount = zero ? -currentBalance : 0;
+  // Marker amount = whatever top-up (or, via sign, drawdown) is needed to move
+  // the balance from current to target. The Supabase numeric column takes
+  // either sign. A ₱0 marker (lock) still anchors the closed-period freeze.
+  const amount = Math.round((target - currentBalance) * 100) / 100;
   const now = new Date().toISOString();
   const datePart = opts?.date?.trim() || now.slice(0, 10);
-  const carried = `₱${currentBalance.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const money = (n: number) =>
+    `₱${n.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const isLock = Math.abs(amount) < 0.005; // target == current balance
+  const isZero = Math.abs(target) < 0.005;
+  const defaultNote = isLock
+    ? `Period locked by admin on ${datePart} — balance ${money(currentBalance)} carried forward`
+    : isZero
+      ? `Balance reset by admin — reconciled to ₱0 on ${datePart}`
+      : `Reconciled by admin to ${money(target)} (counted cash) on ${datePart}`;
   const full: PcfLedgerEntry = {
     id: `p_clear_${Math.random().toString(36).slice(2, 10)}`,
     kind: "top-up",
@@ -3258,11 +3269,7 @@ export function clearPcfBalance(
     reportedBy: adminId,
     approvedBy: adminId,
     status: "approved",
-    note:
-      opts?.note?.trim() ||
-      (zero
-        ? `Balance reset by admin — reconciled to ₱0 on ${datePart}`
-        : `Period locked by admin on ${datePart} — balance ${carried} carried forward`),
+    note: opts?.note?.trim() || defaultNote,
     createdAt: now,
   };
   pcfLedger = [full, ...pcfLedger];
