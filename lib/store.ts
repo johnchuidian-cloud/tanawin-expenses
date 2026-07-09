@@ -9,6 +9,7 @@ import type {
   CategoryDef,
   Entry,
   Note,
+  PcfAdjustment,
   PcfLedgerEntry,
   Receipt,
   SavedVendor,
@@ -154,7 +155,7 @@ export async function bootstrapFromSupabase(): Promise<void> {
         supabase.from("pcf_ledger").select("*").order("created_at", { ascending: false }).range(f, t),
       ),
       supabase.from("category_defs").select("*").eq("builtin", false),
-      supabase.from("category_defs").select("id,icon_key").in("id", [VENDOR_ROW_ID, CATEGORY_ALIAS_ROW_ID]),
+      supabase.from("category_defs").select("id,icon_key").in("id", [VENDOR_ROW_ID, CATEGORY_ALIAS_ROW_ID, PCF_ADJ_ROW_ID]),
     ]);
 
     if (usersRes.error || receiptsRes.error || entriesRes.error || pcfRes.error || catRes.error) {
@@ -221,7 +222,7 @@ export async function refreshFromSupabase(): Promise<void> {
         supabase.from("pcf_ledger").select("*").order("created_at", { ascending: false }).range(f, t),
       ),
       supabase.from("category_defs").select("*").eq("builtin", false),
-      supabase.from("category_defs").select("id,icon_key").in("id", [VENDOR_ROW_ID, CATEGORY_ALIAS_ROW_ID]),
+      supabase.from("category_defs").select("id,icon_key").in("id", [VENDOR_ROW_ID, CATEGORY_ALIAS_ROW_ID, PCF_ADJ_ROW_ID]),
     ]);
     if (
       usersRes.error || receiptsRes.error || entriesRes.error ||
@@ -1024,13 +1025,56 @@ async function persistCategoryAliases(): Promise<boolean> {
   }
 }
 
-/** Apply the two sentinel registry rows (vendor registry + category aliases). */
+// Closed-period adjustment log — see PcfAdjustment. Stored as one JSON array on
+// a sentinel category_defs row "__pcf_adjustments__" (builtin:true so the
+// category fetch skips it), same no-DDL pattern as the vendor/alias registries.
+const PCF_ADJ_ROW_ID = "__pcf_adjustments__";
+let pcfAdjustments: PcfAdjustment[] = [];
+
+function parsePcfAdjustments(raw: unknown): PcfAdjustment[] {
+  if (typeof raw !== "string" || !raw.trim().startsWith("[")) return [];
+  try {
+    const arr = JSON.parse(raw) as unknown[];
+    return arr.filter(
+      (x): x is PcfAdjustment =>
+        !!x &&
+        typeof (x as PcfAdjustment).at === "string" &&
+        typeof (x as PcfAdjustment).delta === "number" &&
+        typeof (x as PcfAdjustment).summary === "string",
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function persistPcfAdjustments(): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from("category_defs")
+      .upsert(
+        { id: PCF_ADJ_ROW_ID, builtin: true, icon_key: JSON.stringify(pcfAdjustments) },
+        { onConflict: "id" },
+      );
+    if (error) console.error("supabase: persistPcfAdjustments", error);
+  } catch (err) {
+    console.error("supabase: persistPcfAdjustments threw", err);
+  }
+}
+
+/** Closed-period reset adjustments, newest first (for the PCF page). */
+export function getPcfResetAdjustments(): PcfAdjustment[] {
+  return [...pcfAdjustments].sort((a, b) => (a.at < b.at ? 1 : -1));
+}
+
+/** Apply the sentinel registry rows (vendor registry + category aliases + PCF log). */
 function applyRegistryRows(rows: Array<Record<string, unknown>> | null | undefined): void {
   const list = Array.isArray(rows) ? rows : [];
   const vRow = list.find((r) => r.id === VENDOR_ROW_ID);
   const cRow = list.find((r) => r.id === CATEGORY_ALIAS_ROW_ID);
+  const aRow = list.find((r) => r.id === PCF_ADJ_ROW_ID);
   vendorRegistry = parseVendorRegistry(vRow?.icon_key);
   categoryAliases = parseCategoryAliases(cRow?.icon_key);
+  pcfAdjustments = parsePcfAdjustments(aRow?.icon_key);
 }
 
 export function getCategoryAliases(): Record<string, string> {
@@ -1752,6 +1796,7 @@ export function updateEntry(id: string, updates: Partial<Entry>): void {
       before.createdAt,
       pcfDrawContribution(before),
       pcfDrawContribution(entries.find((e) => e.id === id)),
+      { summary: `Edited “${before.item}” (${shortDate(before.date)}) in a closed period` },
     );
   }
 
@@ -2006,6 +2051,13 @@ export async function spreadEntryAcrossMonths(
 /** Whole-peso display for history summaries (₱12,000 not ₱12,000.00). */
 function peso0(n: number): string {
   return `₱${Math.round(n).toLocaleString()}`;
+}
+
+/** Readable short date for log summaries, e.g. "Jan 15, 2026". */
+function shortDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 export function addNoteToEntry(
@@ -2713,7 +2765,10 @@ export async function deleteEntry(
 
   // If this entry was in a closed (pre-reset) period, removing its drawdown
   // would inflate the current balance. Freeze the period by nudging the reset.
-  await freezeClosedPeriodDelta(snapshot.createdAt, drawBefore, 0);
+  await freezeClosedPeriodDelta(snapshot.createdAt, drawBefore, 0, {
+    summary: `Deleted “${snapshot.item}” (${shortDate(snapshot.date)}) from a closed period`,
+    by: byUserId ?? snapshot.loggedBy,
+  });
 
   // Undo = re-create the entry exactly, and roll the receipt back to its
   // pre-deletion status + deletion log.
@@ -2747,7 +2802,10 @@ export async function deleteEntry(
       ...entries,
     ];
     // Restore the closed-period freeze we applied on delete (reverse the nudge).
-    await freezeClosedPeriodDelta(snapshot.createdAt, 0, drawBefore);
+    await freezeClosedPeriodDelta(snapshot.createdAt, 0, drawBefore, {
+      summary: `Restored “${snapshot.item}” (${shortDate(snapshot.date)})`,
+      by: byUserId ?? snapshot.loggedBy,
+    });
     if (receiptId && priorReceipt) {
       receipts = receipts.map((r) =>
         r.id === receiptId
@@ -2858,6 +2916,7 @@ async function freezeClosedPeriodDelta(
   entryCreatedAt: string | undefined,
   oldContribution: number,
   newContribution: number,
+  log?: { summary: string; by?: string },
 ): Promise<void> {
   const reset = latestPcfReset();
   if (!reset || !entryCreatedAt || entryCreatedAt > (reset.createdAt ?? "")) return;
@@ -2871,6 +2930,18 @@ async function freezeClosedPeriodDelta(
     .update({ amount: newAmount })
     .eq("id", reset.id);
   if (error) console.error("supabase: freezeClosedPeriodDelta", error);
+
+  // Record the adjustment so it's visible to admins rather than a silent
+  // change to the reset figure. Best-effort: a log failure never blocks the
+  // balance correction above.
+  if (log) {
+    pcfAdjustments = [
+      ...pcfAdjustments,
+      { at: new Date().toISOString(), by: log.by, delta, summary: log.summary },
+    ];
+    notify();
+    await persistPcfAdjustments();
+  }
 }
 
 /** Is this entry flagged as a personal purchase (excluded from PCF)? */
@@ -2927,6 +2998,10 @@ export async function setEntryPersonal(
     entry.createdAt,
     entry.paidFrom === "pcf" && !wasPersonal ? entry.total : 0,
     entry.paidFrom === "pcf" && !isPersonal ? entry.total : 0,
+    {
+      summary: `${isPersonal ? "Marked" : "Unmarked"} “${entry.item}” (${shortDate(entry.date)}) as personal`,
+      by: byUserId,
+    },
   );
 
   appendEntryHistory(entryId, {

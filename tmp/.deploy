@@ -50,3 +50,4 @@ trigger
 2026-06-18g — hashed PINs (login compares digests; manage-staff sets-new-only) + weekly DB backup script
 2026-06-18h — PCF: freeze closed periods (edits/deletes to pre-reset entries auto-adjust the reset so the current balance never moves)
 2026-06-18i — Search: date matching + tag-label match in entries search, focused Search entry point in all role navs
+2026-06-18j — PCF reset-adjustment log: closed-period nudges now recorded (PcfAdjustment) and shown on the PCF page

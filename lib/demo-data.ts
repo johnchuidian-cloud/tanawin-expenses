@@ -135,12 +135,36 @@ const PCF_LEDGER = [
   },
 ];
 
+// Sentinel category_defs rows are the app's no-DDL KV store (builtin:true so
+// the category list skips them). Here it seeds a couple of closed-period reset
+// adjustments so the demo PCF page showcases that log.
+const CATEGORY_DEFS = [
+  {
+    id: "__pcf_adjustments__",
+    builtin: true,
+    icon_key: JSON.stringify([
+      {
+        at: "2026-06-19T07:27:38.000Z",
+        by: "u_lexi",
+        delta: -2299,
+        summary: "Moved “Internet — May” (May 10) to another fund in a closed period",
+      },
+      {
+        at: "2026-06-22T01:10:00.000Z",
+        by: "u_lexi",
+        delta: -85,
+        summary: "Deleted “Light bulbs (6 pcs)” (Apr 15) from a closed period",
+      },
+    ]),
+  },
+];
+
 const TABLES: Record<string, Record<string, unknown>[]> = {
   users: USERS,
   receipts: RECEIPTS,
   entries: ENTRIES,
   pcf_ledger: PCF_LEDGER,
-  category_defs: [],
+  category_defs: CATEGORY_DEFS,
 };
 
 /**

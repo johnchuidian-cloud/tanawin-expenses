@@ -6,6 +6,7 @@ import {
   ArrowDown,
   ArrowUp,
   MessageSquare,
+  Scale,
   Wallet,
   XCircle,
 } from "lucide-react";
@@ -15,10 +16,11 @@ import {
   getEntries,
   getPcfBalance,
   getPcfLedger,
+  getPcfResetAdjustments,
   getPersonalEntryIds,
   getUserById,
 } from "@/lib/store";
-import { peso, relativeDate } from "@/lib/format";
+import { formatDateTime, peso, pesoSigned, relativeDate } from "@/lib/format";
 import { paidFromRowClasses } from "@/lib/payment-meta";
 import ExportButton from "@/components/ExportButton";
 import ReceiptsPackButton from "@/components/ReceiptsPackButton";
@@ -33,6 +35,7 @@ export default function AdminPcfPage() {
   const ledger = getPcfLedger();
   const entries = getEntries();
   const balance = getPcfBalance();
+  const adjustments = getPcfResetAdjustments();
 
   const { pending, history } = useMemo(() => {
     const topUps = ledger.filter((p) => p.kind === "top-up");
@@ -216,6 +219,52 @@ export default function AdminPcfPage() {
           </div>
         )}
       </section>
+
+      {/* Closed-period reset adjustments — see freezeClosedPeriodDelta in the
+          store. Only shown when there are any, so it stays out of the way. */}
+      {adjustments.length > 0 && (
+        <section className="px-5 pt-5">
+          <p className="text-sm font-medium text-ink-900 mb-1 flex items-center gap-1.5">
+            <Scale className="w-3.5 h-3.5 text-ink-500" />
+            Reset adjustments · {adjustments.length}
+          </p>
+          <p className="text-[11px] text-ink-500 mb-2">
+            When an expense from a month that was already reconciled gets edited or
+            deleted, the balance reset is nudged to match so the current cash on hand
+            stays correct. The money didn&rsquo;t move — these just keep the books honest.
+          </p>
+          <div className="space-y-1.5">
+            {adjustments.map((a, i) => {
+              const who = a.by ? getUserById(a.by)?.name : null;
+              const up = a.delta >= 0;
+              return (
+                <div
+                  key={a.at + i}
+                  className="flex items-start justify-between gap-3 p-3 rounded-lg bg-white border border-sand-200"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm text-ink-900 break-words">{a.summary}</p>
+                    <p className="text-[11px] text-ink-500 mt-0.5">
+                      {formatDateTime(a.at)}
+                      {who ? ` · ${who}` : ""}
+                    </p>
+                  </div>
+                  <div className="flex-shrink-0 text-right">
+                    <p
+                      className={
+                        "text-sm font-medium " + (up ? "text-leaf-600" : "text-clay-500")
+                      }
+                    >
+                      {pesoSigned(a.delta)}
+                    </p>
+                    <p className="text-[10px] text-ink-300 mt-0.5">to reset</p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Drawdowns */}
       <section className="px-5 pt-5">

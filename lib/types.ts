@@ -242,6 +242,19 @@ export interface PcfLedgerEntry {
 }
 
 /**
+ * One entry in the closed-period adjustment log. Recorded whenever an edit to
+ * an already-reconciled (pre-reset) expense nudges the balance reset behind the
+ * scenes, so admins can see WHY the reset figure moved instead of it changing
+ * silently. Stored as a JSON array on a sentinel category_defs row.
+ */
+export interface PcfAdjustment {
+  at: string; // ISO timestamp of the adjustment
+  by?: string; // user id who made the underlying edit (when known)
+  delta: number; // signed peso change applied to the reset figure
+  summary: string; // human description, e.g. 'Deleted "Diesel" (Jan 15) from a closed month'
+}
+
+/**
  * A saved (canonical) vendor and the alternate spellings that should map to
  * it. Aliases are stored normalized (lowercase, punctuation/space-stripped)
  * for matching — see normalizeVendor in lib/store.ts.
