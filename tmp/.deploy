@@ -57,3 +57,4 @@ trigger
 2026-06-18n — Entry edit: VAT + personal now available on receipt-less (old imported) entries — attaches a receipt on save via ensureEntryReceipt
 2026-06-18o — Closed-period freeze now keys on expense DATE and also absorbs newly-added backdated expenses (forgotten old PCF spend no longer disrupts current balance)
 2026-06-18p — Reconcile: add "reconcile to counted cash" mode (snap balance to physically-counted amount), a self-serve safety net
+2026-06-18q — Entries: group-merge backlog entries onto one newly uploaded receipt (Select mode → Receipt), with printed total + VAT; PCF-neutral by construction

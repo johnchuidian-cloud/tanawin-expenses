@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertCircle, ArrowUp, Check, ChevronLeft, ListChecks, Plus, Search, Wand2, X } from "lucide-react";
+import { AlertCircle, ArrowUp, Check, ChevronLeft, ListChecks, Plus, Receipt, Search, Wand2, X } from "lucide-react";
 import { useCurrentUser } from "@/lib/auth";
 import { useStoreTick } from "@/lib/useStoreTick";
 import { getEntries, getPcfLedger, getPersonalEntryIds, getUserById, resolveCategoryAlias } from "@/lib/store";
@@ -15,6 +15,7 @@ import ExpenseByTagChart from "@/components/ExpenseByTagChart";
 import ExportButton from "@/components/ExportButton";
 import ReceiptsPackButton from "@/components/ReceiptsPackButton";
 import BulkCorrectModal from "@/components/BulkCorrectModal";
+import GroupReceiptModal from "@/components/GroupReceiptModal";
 import type { Entry, PcfLedgerEntry } from "@/lib/types";
 
 type Filter = "all" | "mine" | "flagged" | "topups";
@@ -55,12 +56,14 @@ export default function EntriesPage() {
     if (searchParams.get("focus") === "search") searchInputRef.current?.focus();
   }, [searchParams]);
 
-  // Bulk-correction (admin): pick several entries and fix a field across all of
-  // them at once — see components/BulkCorrectModal.tsx.
+  // Select mode (admin) feeds two bulk tools: fix a field across many entries
+  // (components/BulkCorrectModal.tsx), or file several entries onto one newly
+  // uploaded receipt (components/GroupReceiptModal.tsx).
   const isAdmin = me?.role === "admin";
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [correcting, setCorrecting] = useState(false);
+  const [grouping, setGrouping] = useState(false);
   const [correctedMsg, setCorrectedMsg] = useState<string | null>(null);
 
   function toggleSelect(id: string) {
@@ -70,11 +73,19 @@ export default function EntriesPage() {
     setSelectMode(false);
     setSelectedIds([]);
   }
+  function flashDone(message: string) {
+    setCorrectedMsg(message);
+    setTimeout(() => setCorrectedMsg((cur) => (cur === message ? null : cur)), 4000);
+  }
   function handleApplied(n: number) {
     setCorrecting(false);
     exitSelect();
-    setCorrectedMsg(`Corrected ${n} entr${n === 1 ? "y" : "ies"}`);
-    setTimeout(() => setCorrectedMsg((cur) => (cur && cur.startsWith("Corrected") ? null : cur)), 4000);
+    flashDone(`Corrected ${n} entr${n === 1 ? "y" : "ies"}`);
+  }
+  function handleGrouped(message: string) {
+    setGrouping(false);
+    exitSelect();
+    flashDone(message);
   }
 
   const allEntries = getEntries();
@@ -276,19 +287,26 @@ export default function EntriesPage() {
         </div>
       </div>
 
-      {/* Selection action bar — sticky while picking entries to bulk-correct. */}
+      {/* Selection action bar — sticky while picking entries to correct or group. */}
       {selectMode && (
-        <div className="sticky top-0 z-20 px-5 py-2 bg-leaf-50 border-b border-leaf-200 flex items-center justify-between">
-          <p className="text-xs text-ink-700">
+        <div className="sticky top-0 z-20 px-5 py-2 bg-leaf-50 border-b border-leaf-200 flex items-center justify-between gap-2">
+          <p className="text-xs text-ink-700 flex-shrink-0">
             {selectedIds.length} selected
             {selectedIds.length === 0 && <span className="text-ink-500"> · tap entries to pick</span>}
           </p>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {selectedIds.length > 0 && (
               <button onClick={() => setSelectedIds([])} className="text-[11px] text-ink-500 hover:underline">
                 Clear
               </button>
             )}
+            <button
+              onClick={() => setGrouping(true)}
+              disabled={selectedIds.length === 0}
+              className="btn btn-sm bg-white border-sand-200 text-ink-700 disabled:opacity-50"
+            >
+              <Receipt className="w-3.5 h-3.5" /> Receipt
+            </button>
             <button
               onClick={() => setCorrecting(true)}
               disabled={selectedIds.length === 0}
@@ -533,6 +551,14 @@ export default function EntriesPage() {
           entries={allEntries.filter((e) => selectedIds.includes(e.id))}
           onClose={() => setCorrecting(false)}
           onApplied={handleApplied}
+        />
+      )}
+
+      {grouping && (
+        <GroupReceiptModal
+          entries={allEntries.filter((e) => selectedIds.includes(e.id))}
+          onClose={() => setGrouping(false)}
+          onDone={handleGrouped}
         />
       )}
     </div>

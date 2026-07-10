@@ -3141,6 +3141,287 @@ export async function setReceiptVat(
   return { ok: true };
 }
 
+// ---------- BACKLOG RECEIPT GROUPING ----------
+// Receipts from before the app existed get uploaded long after their line items
+// were keyed in, and one physical receipt usually covers several of those
+// entries. Grouping re-points the selected entries onto a single new receipt
+// that carries the photo, the printed total, and the VAT.
+//
+// Grouping never moves the PCF balance: the balance counts entries where
+// paidFrom === "pcf" && !isEntryPersonal, and neither changes here. That's why
+// there is no freezeClosedPeriodDelta call below even though backlog entries are
+// dated deep inside closed months. The one way it could break is dropping a
+// personal flag while moving an entry off its old receipt — the flag lives on
+// the receipt, not the entry — so the carryover below is load-bearing.
+
+/** One selected entry that can't join the grouped receipt, and why. */
+export interface GroupExclusion {
+  entry: Entry;
+  reason: string;
+}
+
+export interface GroupSelection {
+  /** Entries that would move onto the new receipt. */
+  eligible: Entry[];
+  excluded: GroupExclusion[];
+  /** Canonical vendor for the new receipt (registry spelling when known). */
+  vendor: string;
+  /** The date shared by the eligible entries. */
+  date: string;
+  /** Distinct vendor spellings among the eligible entries; empty when uniform. */
+  vendorVariants: string[];
+  /** Sum of the eligible entries' totals — the default printed total. */
+  total: number;
+}
+
+/**
+ * Split a selection into what can and can't be grouped onto one receipt.
+ *
+ * The most common (vendor, date) pair wins and everything else is excluded with
+ * a reason, because a physical receipt has exactly one vendor and one date.
+ * Vendor matching ignores spacing and punctuation, so "Pure Gold" and "Puregold"
+ * group together.
+ *
+ * An entry that already sits on a receipt may move only if that receipt has no
+ * photo AND every one of its line items is in the selection — i.e. it's a
+ * placeholder built by ensureEntryReceipt, not a receipt someone photographed.
+ * This is async because receipt photos are fetched lazily: an unloaded photo
+ * reads as "no photo", and we would delete real evidence on that basis.
+ */
+export async function inspectGroupSelection(entryIds: string[]): Promise<GroupSelection> {
+  const picked = entryIds
+    .map((id) => entries.find((e) => e.id === id))
+    .filter((e): e is Entry => !!e);
+
+  // Load every source receipt's photo before judging any of them photoless.
+  const sourceIds = Array.from(
+    new Set(picked.map((e) => e.receiptId).filter((id): id is string => !!id)),
+  );
+  await Promise.all(sourceIds.map((id) => ensureReceiptPhoto(id)));
+
+  const groupKey = (e: Entry) => `${squashVendor(e.vendor)}|${e.date}`;
+  const counts = new Map<string, number>();
+  for (const e of picked) counts.set(groupKey(e), (counts.get(groupKey(e)) ?? 0) + 1);
+  const winner = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+
+  const eligible: Entry[] = [];
+  const excluded: GroupExclusion[] = [];
+  for (const e of picked) {
+    if (groupKey(e) !== winner) {
+      excluded.push({ entry: e, reason: `${e.vendor} · ${shortDate(e.date)} — different vendor or date` });
+      continue;
+    }
+    if (e.receiptId) {
+      const r = receipts.find((x) => x.id === e.receiptId);
+      if (!r) {
+        excluded.push({ entry: e, reason: "Its receipt is missing — refresh and try again" });
+        continue;
+      }
+      if (!isReceiptPhotoLoaded(r.id)) {
+        excluded.push({ entry: e, reason: "Couldn't check its receipt — check your internet" });
+        continue;
+      }
+      if (r.photoUrl) {
+        excluded.push({ entry: e, reason: "Already on a receipt that has a photo" });
+        continue;
+      }
+      const outside = entries.filter((x) => x.receiptId === r.id && !entryIds.includes(x.id));
+      if (outside.length > 0) {
+        excluded.push({
+          entry: e,
+          reason: `Its receipt has ${outside.length} other item${outside.length === 1 ? "" : "s"} you didn't select`,
+        });
+        continue;
+      }
+    }
+    eligible.push(e);
+  }
+
+  // Most common spelling among the eligible entries, upgraded to the registry's
+  // canonical name when the vendor is a known one.
+  const spellings = new Map<string, number>();
+  for (const e of eligible) spellings.set(e.vendor, (spellings.get(e.vendor) ?? 0) + 1);
+  const common = [...spellings.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? picked[0]?.vendor ?? "";
+
+  return {
+    eligible,
+    excluded,
+    vendor: suggestCanonicalVendor(common) ?? common,
+    date: eligible[0]?.date ?? picked[0]?.date ?? "",
+    vendorVariants: spellings.size > 1 ? [...spellings.keys()] : [],
+    total: Math.round(eligible.reduce((s, e) => s + e.total, 0) * 100) / 100,
+  };
+}
+
+/**
+ * Move several existing entries onto one newly uploaded receipt.
+ *
+ * Placeholder receipts left empty by the move are deleted. Personal-purchase
+ * flags travel with their entries (see the section note above). Undo restores
+ * the placeholders and re-points the entries back.
+ */
+export async function groupEntriesIntoReceipt(input: {
+  entryIds: string[];
+  vendor: string;
+  date: string;
+  photoUrl?: string;
+  /** Printed total on the receipt. Defaults to the sum of the line items. */
+  receiptTotal?: number;
+  /** VAT already included in the printed total — informational. */
+  vatAmount?: number;
+  capturedBy: string;
+}): Promise<
+  | { ok: true; receipt: Receipt; moved: number; warning?: string }
+  | { ok: false; reason: string }
+> {
+  if (input.entryIds.length === 0) return { ok: false, reason: "Pick at least one entry." };
+
+  // Re-check against live state: the modal's partition can be stale (another
+  // device may have photographed one of these receipts in the meantime).
+  const check = await inspectGroupSelection(input.entryIds);
+  if (check.excluded.length > 0 || check.eligible.length === 0) {
+    return { ok: false, reason: "These entries can no longer be grouped — close and reselect them." };
+  }
+  const picked = check.eligible;
+
+  const sum = Math.round(picked.reduce((s, e) => s + e.total, 0) * 100) / 100;
+  const totalTyped = input.receiptTotal ?? sum;
+  const status = reconciliationStatus(totalTyped, picked.map((e) => e.total)).status;
+
+  // Personal flags live on the receipt, so they must travel with the entries.
+  // Losing one here would silently add its amount back to the PCF drawdown.
+  const personal = picked.filter((e) => isEntryPersonal(e.id)).map((e) => e.id);
+
+  const receipt: Receipt = {
+    id: `r_${Math.random().toString(36).slice(2, 10)}`,
+    vendor: input.vendor.trim(),
+    date: input.date,
+    photoUrl: input.photoUrl ?? "",
+    totalTyped,
+    capturedBy: input.capturedBy,
+    status,
+    personalEntryIds: personal.length > 0 ? personal : undefined,
+    vatAmount: input.vatAmount && input.vatAmount > 0 ? input.vatAmount : undefined,
+  };
+  const ocr = serializeReceiptOcrFor(receipt);
+
+  const movedIds = picked.map((e) => e.id);
+  const priorReceiptId = new Map(picked.map((e) => [e.id, e.receiptId]));
+  // Eligibility guarantees each of these is photoless and has no line item
+  // outside the selection, so the move empties it completely.
+  const emptied = Array.from(new Set(picked.map((e) => e.receiptId).filter((id): id is string => !!id)))
+    .map((id) => receipts.find((r) => r.id === id))
+    .filter((r): r is Receipt => !!r);
+
+  // Persist first, in FK-safe order: the receipt must exist before entries point
+  // at it, and nothing may still reference a receipt row we're about to delete.
+  const { error: rErr } = await supabase.from("receipts").insert({
+    id: receipt.id,
+    vendor: receipt.vendor,
+    date: receipt.date,
+    photo_url: receipt.photoUrl,
+    ocr_text: ocr,
+    total_typed: receipt.totalTyped,
+    captured_by: receipt.capturedBy,
+    status: receipt.status,
+  });
+  if (rErr) {
+    console.error("supabase: groupEntriesIntoReceipt receipt", rErr);
+    return { ok: false, reason: "Couldn't create the receipt — check your internet and try again." };
+  }
+
+  const { error: eErr } = await supabase
+    .from("entries")
+    .update({ receipt_id: receipt.id })
+    .in("id", movedIds);
+  if (eErr) {
+    console.error("supabase: groupEntriesIntoReceipt link", eErr);
+    await supabase.from("receipts").delete().eq("id", receipt.id); // don't orphan it
+    return { ok: false, reason: "Couldn't attach the entries — check your internet and try again." };
+  }
+
+  // A failed cleanup leaves harmless empty placeholders behind; the grouping
+  // itself already succeeded, so report it rather than unwinding.
+  let stranded = false;
+  if (emptied.length > 0) {
+    const { error } = await supabase.from("receipts").delete().in("id", emptied.map((r) => r.id));
+    if (error) {
+      console.error("supabase: groupEntriesIntoReceipt cleanup", error);
+      stranded = true;
+    }
+  }
+
+  const removedIds = new Set(stranded ? [] : emptied.map((r) => r.id));
+  _receiptPhotoCache.set(receipt.id, receipt.photoUrl);
+  removedIds.forEach((id) => _receiptPhotoCache.delete(id));
+  entries = entries.map((e) => (movedIds.includes(e.id) ? { ...e, receiptId: receipt.id } : e));
+  receipts = [receipt, ...receipts.filter((r) => !removedIds.has(r.id))];
+  notify();
+
+  for (const e of picked) {
+    appendEntryHistory(e.id, {
+      at: new Date().toISOString(),
+      by: input.capturedBy,
+      summary: `Grouped onto a shared receipt (${receipt.vendor}, ${shortDate(receipt.date)})`,
+    });
+  }
+
+  setUndoable(
+    `Grouped ${picked.length} item${picked.length === 1 ? "" : "s"} · ${receipt.vendor}`,
+    async () => {
+      // Restore the placeholders first — the FK needs them back before their
+      // entries can point at them again.
+      const restore = emptied.filter((r) => removedIds.has(r.id));
+      if (restore.length > 0) {
+        const { error } = await supabase.from("receipts").insert(
+          restore.map((r) => ({
+            id: r.id,
+            vendor: r.vendor,
+            date: r.date,
+            photo_url: r.photoUrl,
+            ocr_text: serializeReceiptOcrFor(r),
+            total_typed: r.totalTyped,
+            captured_by: r.capturedBy,
+            status: r.status,
+          })),
+        );
+        if (error) {
+          console.error("supabase: undo groupEntriesIntoReceipt restore", error);
+          return { ok: false, reason: "Couldn't restore the original receipts." };
+        }
+      }
+      for (const e of picked) {
+        const { error } = await supabase
+          .from("entries")
+          .update({ receipt_id: priorReceiptId.get(e.id) ?? null })
+          .eq("id", e.id);
+        if (error) {
+          console.error("supabase: undo groupEntriesIntoReceipt detach", error);
+          return { ok: false, reason: "Couldn't detach the entries — refresh to check the current state." };
+        }
+      }
+      const { error: delErr } = await supabase.from("receipts").delete().eq("id", receipt.id);
+      if (delErr) console.error("supabase: undo groupEntriesIntoReceipt delete", delErr);
+
+      _receiptPhotoCache.delete(receipt.id);
+      restore.forEach((r) => _receiptPhotoCache.set(r.id, r.photoUrl));
+      entries = entries.map((e) =>
+        movedIds.includes(e.id) ? { ...e, receiptId: priorReceiptId.get(e.id) } : e,
+      );
+      receipts = [...restore, ...receipts.filter((r) => r.id !== receipt.id)];
+      notify();
+      return { ok: true };
+    },
+  );
+
+  return {
+    ok: true,
+    receipt,
+    moved: picked.length,
+    warning: stranded ? "Grouped, but the old placeholder receipts couldn't be cleaned up." : undefined,
+  };
+}
+
 export function reportPcfTopUp(input: {
   amount: number;
   date: string;
