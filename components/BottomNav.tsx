@@ -145,6 +145,19 @@ export default function BottomNav({ role }: { role: Role }) {
             </p>
             <div className="grid grid-cols-4 gap-1 px-2 pb-3">
               {items.map(renderLink)}
+              {/* Admin-only jump to the Tanawin Hub launcher (fleet-wide
+                  convention: house glyph + "Hub", admins only). External
+                  site, so a plain <a> — Next's <Link>/isActive don't apply.
+                  No SSO: each app keeps its own login. */}
+              {role === "admin" && (
+                <a
+                  href="https://tanawin-hub.tanawinbnb.workers.dev/"
+                  className="flex flex-col items-center gap-1 py-2.5 text-[10px] text-ink-500 hover:text-ink-900 transition-colors"
+                >
+                  <Home className="w-5 h-5" />
+                  <span>Hub</span>
+                </a>
+              )}
             </div>
           </div>
         )}
