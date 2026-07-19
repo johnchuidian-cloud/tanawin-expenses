@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { User as UserIcon } from "lucide-react";
 import { useCurrentUser, logout, homePathFor } from "@/lib/auth";
 import BottomNav from "@/components/BottomNav";
+import HubLink from "@/components/HubLink";
 import NotificationsBell from "@/components/NotificationsBell";
 import UndoToast from "@/components/UndoToast";
 
@@ -40,6 +41,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
         <div className="flex items-center gap-1">
           <NotificationsBell user={user} />
+          <HubLink />
           <button
             onClick={() => {
               logout();
