@@ -60,3 +60,4 @@ trigger
 2026-06-18q — Entries: group-merge backlog entries onto one newly uploaded receipt (Select mode → Receipt), with printed total + VAT; PCF-neutral by construction
 2026-06-18h — admin-only "Hub" link in the nav menu (to the Tanawin Hub launcher)
 2026-06-18i — Hub link moved to the persistent admin header (bell · Hub · Sign out)
+2026-06-18r — Receipts pack: fix statement timeout (57014) on photo-heavy months — May/June downloads failed for the accountant; photo queries now page at 25 rows with backoff
