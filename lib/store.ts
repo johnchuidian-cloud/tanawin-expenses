@@ -123,19 +123,35 @@ function sortUsers(list: User[]): User[] {
  * Without this, large tables (entries) silently truncate at 1000 rows — which
  * made all-time totals like the PCF balance read wrong once entries crossed
  * 1000 (the oldest rows dropped, their drawdowns never subtracted).
+ *
+ * `pageSize` matters for the photo queries: rows carrying base64 images are
+ * megabytes each, and asking for 1000 of them at once takes long enough that
+ * Postgres cancels the statement (see STATEMENT TIMEOUT note on loadAllMedia).
+ * Any page that IS cancelled is retried at half the size rather than failing
+ * the whole load, so a month that grows past the limit degrades into more,
+ * smaller requests instead of erroring.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function selectAllRows(
   build: (from: number, to: number) => PromiseLike<{ data: any[] | null; error: unknown }>,
+  pageSize = 1000,
 ): Promise<{ data: Record<string, unknown>[] | null; error: unknown }> {
-  const pageSize = 1000;
   const all: Record<string, unknown>[] = [];
-  for (let from = 0; ; from += pageSize) {
-    const { data, error } = await build(from, from + pageSize - 1);
-    if (error) return { data: null, error };
+  let size = pageSize;
+  for (let from = 0; ; ) {
+    const { data, error } = await build(from, from + size - 1);
+    if (error) {
+      // 57014 = statement timeout. The page was too heavy; ask for less.
+      if ((error as { code?: string })?.code === "57014" && size > 1) {
+        size = Math.max(1, Math.floor(size / 2));
+        continue;
+      }
+      return { data: null, error };
+    }
     const rows = data ?? [];
     all.push(...rows);
-    if (rows.length < pageSize) break;
+    if (rows.length < size) break;
+    from += size;
   }
   return { data: all, error: null };
 }
@@ -732,7 +748,22 @@ export function ensureReceiptPhoto(id: string): Promise<void> {
  * effectively immutable once logged), and concurrent calls for the same
  * scope share one request — repeated gallery visits were each re-downloading
  * tens of MB otherwise.
+ *
+ * STATEMENT TIMEOUT — why the tiny page size. These rows carry base64 JPEGs,
+ * so a month is tens of MB. Asking for it in one 1000-row page made Postgres
+ * spend longer than the anon role's statement_timeout reading it back, and it
+ * cancelled the query (code 57014) — a hard 500, not a slow success. The
+ * accountant hit this on May 2026 (202 entry rows / 21.9 MB) and June 2026
+ * (75 receipt rows / 25.4 MB): the receipts pack failed with what looked like
+ * a connection error, on every retry, for those months only. Small pages keep
+ * each statement well inside the limit; total wall time is about the same,
+ * because the bytes transferred are identical either way.
+ *
+ * NOTE for future debugging: this is invisible to the tmp/*.mjs service-key
+ * scripts — service_role is exempt from the timeout. Reproduce with the ANON
+ * key if a load works in a script but fails in the app.
  */
+const MEDIA_PAGE_SIZE = 25;
 const _mediaScopesLoaded = new Set<string>();
 const _mediaScopesPending = new Map<string, Promise<boolean>>();
 
@@ -757,14 +788,18 @@ async function loadAllMediaUncached(scope: "all" | string): Promise<boolean> {
     }
     // Paginate — the "all" scope (and any month with >1000 rows) would
     // otherwise truncate at PostgREST's 1000-row cap and miss photos.
+    // order("id") is required, not cosmetic: without a stable sort, Postgres
+    // may return rows in a different order per page, so offset paging would
+    // silently skip or duplicate photos. Harmless when everything fit in one
+    // page; load-bearing now that MEDIA_PAGE_SIZE is small.
     const range = (table: string) => (f: number, t: number) => {
       let q = supabase.from(table).select("id,photo_url");
       if (scope !== "all") q = q.gte("date", start).lte("date", end);
-      return q.range(f, t);
+      return q.order("id", { ascending: true }).range(f, t);
     };
     const [rRes, eRes] = await Promise.all([
-      selectAllRows(range("receipts")),
-      selectAllRows(range("entries")),
+      selectAllRows(range("receipts"), MEDIA_PAGE_SIZE),
+      selectAllRows(range("entries"), MEDIA_PAGE_SIZE),
     ]);
     if (rRes.error || eRes.error) {
       console.error("supabase: loadAllMedia", { rRes, eRes });
