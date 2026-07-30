@@ -54,7 +54,7 @@ export default function SharedLayout({ children }: { children: React.ReactNode }
         </div>
         <div className="flex items-center gap-1">
           <NotificationsBell user={user} />
-          {user.role === "admin" && <HubLink />}
+          {user.role !== "guest" && <HubLink role={user.role} />}
           <button
             onClick={() => {
               logout();

@@ -41,7 +41,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
         <div className="flex items-center gap-1">
           <NotificationsBell user={user} />
-          <HubLink />
+          <HubLink role="admin" />
           <button
             onClick={() => {
               logout();
