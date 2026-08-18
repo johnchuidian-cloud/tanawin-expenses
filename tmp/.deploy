@@ -62,3 +62,4 @@ trigger
 2026-06-18i — Hub link moved to the persistent admin header (bell · Hub · Sign out)
 2026-06-18r — Receipts pack: fix statement timeout (57014) on photo-heavy months — May/June downloads failed for the accountant; photo queries now page at 25 rows with backoff
 2026-06-18s — Hub link now shown to staff too, with a role-aware target (admin → full hub, staff → /staff which excludes Payroll); guests still see nothing
+2026-06-18t — "Update available" banner: a running page now notices a newer build and offers a refresh (never auto-reloads). Retires the close-and-reopen-after-every-deploy step.
