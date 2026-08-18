@@ -26,8 +26,9 @@ const POLL_MS = 5 * 60 * 1000;
 const DISMISS_KEY = "tanawin.update.dismissed";
 
 /**
- * The build id we compare against. Deliberately seeded from the first
- * successful fetch rather than from BAKED_BUILD_ID — see the note in check().
+ * The build id we compare against. Seeded from the first successful fetch
+ * rather than from BAKED_BUILD_ID — see the note in check(), which also
+ * explains why the baked id is still consulted on later polls.
  */
 let baseline: string | null = null;
 let seenFirstCheck = false;
@@ -88,19 +89,29 @@ async function check(onUpdate: (build: string) => void): Promise<void> {
     if (!deployed) return;
 
     // The first successful check only establishes the baseline — it must never
-    // raise a banner. This matters more than it looks: right after a deploy the
-    // edge can hand one client a fresh /version.json while still serving it the
-    // previous HTML/bundle. Comparing the baked id to the fetched one at load
-    // would then show "Update available" on a page whose refresh returns the
-    // same stale bundle — a banner the user cannot clear by obeying it. Seeding
-    // the baseline from what we actually fetched makes that self-heal.
+    // raise a banner. Right after a deploy the edge can hand one client a fresh
+    // /version.json while still serving it the previous HTML/bundle. Comparing
+    // baked-vs-fetched *at load* would then show "Update available" on a page
+    // whose refresh returns the same stale bundle — a banner the user cannot
+    // clear by obeying it.
     if (!seenFirstCheck) {
       seenFirstCheck = true;
       baseline = deployed;
       return;
     }
 
-    if (deployed !== baseline && deployed !== dismissedBuild()) {
+    // Two independent reasons to offer a refresh (Kitchen's refinement, and it
+    // matters): a NEW deploy landed while this page was open, or this page is
+    // simply running a stale bundle. The second case is not hypothetical — if
+    // the page loaded old HTML while /version.json was already new, baseline
+    // alone records that new id as "current" and the page would never notice it
+    // is behind, defeating the feature in exactly the propagation-lag case it
+    // exists for. Checking the baked id on SUBSEQUENT polls only keeps the
+    // load-time false positive out while still catching this.
+    const isNewDeploy = deployed !== baseline;
+    const runningStaleBundle = !!BAKED_BUILD_ID && deployed !== BAKED_BUILD_ID;
+
+    if ((isNewDeploy || runningStaleBundle) && deployed !== dismissedBuild()) {
       onUpdate(deployed);
     }
   } finally {
