@@ -27,6 +27,9 @@ type Row =
   | { kind: "expense"; date: string; entry: Entry }
   | { kind: "topup"; date: string; topup: PcfLedgerEntry };
 
+/** Rows rendered at a time; "Show older" adds another window. */
+const PAGE_ROWS = 150;
+
 export default function EntriesPage() {
   useStoreTick();
   const me = useCurrentUser();
@@ -178,16 +181,32 @@ export default function EntriesPage() {
     return Array.from(map.entries()).map(([label, total]) => ({ label, total }));
   }, [expenseRows]);
 
+  // How many rows are actually put in the DOM. The default scope is "all", so
+  // this list grows without bound — ~200 expenses a month, already 1,456 rows,
+  // and every row is a link with its own icon and badges. Rendering the lot
+  // makes the ledger the slowest screen in the app on the phones it's used on,
+  // and it gets worse every month. Newest rows are the ones people want, so we
+  // render a window and let them ask for more.
+  const [visibleCount, setVisibleCount] = useState(PAGE_ROWS);
+
+  // Any change to the filters means a different list — start from the top.
+  useEffect(() => {
+    setVisibleCount(PAGE_ROWS);
+  }, [filter, q, categoryFilter, staffIdFilter, monthScope]);
+
+  const visibleRows = useMemo(() => rows.slice(0, visibleCount), [rows, visibleCount]);
+  const hiddenCount = rows.length - visibleRows.length;
+
   // Group by date for visual separation
   const grouped = useMemo(() => {
     const map = new Map<string, Row[]>();
-    for (const r of rows) {
+    for (const r of visibleRows) {
       const list = map.get(r.date) ?? [];
       list.push(r);
       map.set(r.date, list);
     }
     return Array.from(map.entries());
-  }, [rows]);
+  }, [visibleRows]);
 
   const counts = useMemo(
     () => ({
@@ -544,6 +563,17 @@ export default function EntriesPage() {
             </div>
           );
         })}
+
+        {hiddenCount > 0 && (
+          <div className="px-5 pt-4 pb-2">
+            <button
+              onClick={() => setVisibleCount((n) => n + PAGE_ROWS)}
+              className="btn btn-sm w-full"
+            >
+              Show older ({hiddenCount.toLocaleString()} more)
+            </button>
+          </div>
+        )}
       </div>
 
       {correcting && (

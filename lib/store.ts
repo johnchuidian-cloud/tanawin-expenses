@@ -1,6 +1,7 @@
 "use client";
 
 import { supabase } from "./supabase";
+import { selectAllRows } from "./paging";
 import { reconciliationStatus } from "./validation";
 import { BUILTIN_CATEGORIES } from "./types";
 import type {
@@ -118,43 +119,6 @@ function sortUsers(list: User[]): User[] {
   });
 }
 
-/**
- * Fetch EVERY row from a query, paging past PostgREST's default 1000-row cap.
- * Without this, large tables (entries) silently truncate at 1000 rows — which
- * made all-time totals like the PCF balance read wrong once entries crossed
- * 1000 (the oldest rows dropped, their drawdowns never subtracted).
- *
- * `pageSize` matters for the photo queries: rows carrying base64 images are
- * megabytes each, and asking for 1000 of them at once takes long enough that
- * Postgres cancels the statement (see STATEMENT TIMEOUT note on loadAllMedia).
- * Any page that IS cancelled is retried at half the size rather than failing
- * the whole load, so a month that grows past the limit degrades into more,
- * smaller requests instead of erroring.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function selectAllRows(
-  build: (from: number, to: number) => PromiseLike<{ data: any[] | null; error: unknown }>,
-  pageSize = 1000,
-): Promise<{ data: Record<string, unknown>[] | null; error: unknown }> {
-  const all: Record<string, unknown>[] = [];
-  let size = pageSize;
-  for (let from = 0; ; ) {
-    const { data, error } = await build(from, from + size - 1);
-    if (error) {
-      // 57014 = statement timeout. The page was too heavy; ask for less.
-      if ((error as { code?: string })?.code === "57014" && size > 1) {
-        size = Math.max(1, Math.floor(size / 2));
-        continue;
-      }
-      return { data: null, error };
-    }
-    const rows = data ?? [];
-    all.push(...rows);
-    if (rows.length < size) break;
-    from += size;
-  }
-  return { data: all, error: null };
-}
 
 export async function bootstrapFromSupabase(): Promise<void> {
   if (_bootstrapped || _bootstrapping) return;
@@ -829,6 +793,54 @@ async function loadAllMediaUncached(scope: "all" | string): Promise<boolean> {
     console.error("supabase: loadAllMedia threw", err);
     return false;
   }
+}
+
+/**
+ * Drop the cached photo bytes for a month, so a bulk reader can work through
+ * many months without holding all of them at once.
+ *
+ * SCALE — why this exists. Photos are base64 data URLs kept in module-level
+ * caches that nothing ever evicted, so "All time" pinned every photo in the
+ * database in memory for the rest of the session. Measured at 868 media rows:
+ * ~90 MB of base64 (which is ~2 bytes per char in a JS string), peaking at
+ * ~360 MB RSS while zipping, and the archive grows ~28 MB per month. A phone
+ * tab does not survive that at a year's worth, and it is a silent crash rather
+ * than an error anyone can report usefully.
+ *
+ * Only the photo bytes go. Entry edit history is dropped with them (it shares
+ * the cache entry) but it is small and re-fetched on demand by the pages that
+ * show it. The scope is un-marked so a later reader re-fetches rather than
+ * seeing an empty cache and believing the month has no photos.
+ */
+export function releaseMediaScope(scope: "all" | string): void {
+  const inScope = (date: string) => scope === "all" || toMonthKeyLocal(date) === scope;
+
+  for (const r of receipts) {
+    if (inScope(r.date)) _receiptPhotoCache.delete(r.id);
+  }
+  for (const e of entries) {
+    if (inScope(e.date)) _entryMediaCache.delete(e.id);
+  }
+
+  receipts = receipts.map((r) => (inScope(r.date) && r.photoUrl ? { ...r, photoUrl: "" } : r));
+  entries = entries.map((e) =>
+    inScope(e.date) && (e.photoUrls?.length ?? 0) > 0
+      ? { ...e, photoUrls: [], photoUrl: undefined }
+      : e,
+  );
+
+  if (scope === "all") _mediaScopesLoaded.clear();
+  else {
+    _mediaScopesLoaded.delete(scope);
+    // An "all" marker would otherwise short-circuit the re-fetch of this month.
+    _mediaScopesLoaded.delete("all");
+  }
+  notify();
+}
+
+/** Month key (YYYY-MM) straight off an ISO date string, no Date parsing. */
+function toMonthKeyLocal(dateIso: string): string {
+  return (dateIso ?? "").slice(0, 7);
 }
 
 // ---------- CATEGORIES ----------
@@ -1574,6 +1586,10 @@ export async function mergeVendors(
 
 const subscribers = new Set<() => void>();
 function notify() {
+  // Any mutation can change which line items are flagged personal, and the
+  // flags live scattered across receipt blobs — so the derived set is thrown
+  // away here and rebuilt on next use rather than patched at every call site.
+  _personalIdsCache = null;
   subscribers.forEach((fn) => fn());
 }
 export function subscribe(fn: () => void): () => void {
@@ -2232,7 +2248,10 @@ async function _hardDeleteEntries(ids: string[]): Promise<boolean> {
     console.error("supabase: _hardDeleteEntries", error);
     return false;
   }
-  entries = entries.filter((e) => !ids.includes(e.id));
+  // Set, not ids.includes: this runs over every entry, so a list scan makes it
+  // entries x ids — a bulk delete of a whole month against a few years of rows.
+  const doomed = new Set(ids);
+  entries = entries.filter((e) => !doomed.has(e.id));
   ids.forEach((id) => _entryMediaCache.delete(id));
   return true;
 }
@@ -2922,11 +2941,15 @@ export function getPcfLedger(): PcfLedgerEntry[] {
  * from the petty cash drawdown. Built from the receipts' ocr_text blobs, which
  * load eagerly, so the PCF balance is correct without fetching photos.
  */
+let _personalIdsCache: Set<string> | null = null;
+
 export function getPersonalEntryIds(): Set<string> {
+  if (_personalIdsCache) return _personalIdsCache;
   const set = new Set<string>();
   for (const r of receipts) {
     for (const id of r.personalEntryIds ?? []) set.add(id);
   }
+  _personalIdsCache = set;
   return set;
 }
 
@@ -3015,9 +3038,16 @@ async function freezeClosedPeriodDelta(
   }
 }
 
-/** Is this entry flagged as a personal purchase (excluded from PCF)? */
+/**
+ * Is this entry flagged as a personal purchase (excluded from PCF)?
+ *
+ * Goes through the memoised set rather than scanning every receipt's blob:
+ * this is called per-entry inside loops (group selection, bulk operations),
+ * which made it receipts x entries work — fine at 194 receipts, not at a few
+ * years of them.
+ */
 export function isEntryPersonal(entryId: string): boolean {
-  return receipts.some((r) => r.personalEntryIds?.includes(entryId));
+  return getPersonalEntryIds().has(entryId);
 }
 
 /**

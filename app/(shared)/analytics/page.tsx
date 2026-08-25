@@ -179,10 +179,23 @@ export default function AnalyticsPage() {
   // oldest→newest, for the bar strip.
   const trend = useMemo(() => {
     const monthsAsc = [...availableMonths].sort().slice(-12);
+    // Bucket in ONE pass over entries. Re-filtering the whole ledger per month
+    // was months x entries — and both sides grow, so the cost climbs
+    // quadratically with time rather than linearly. This runs on every render
+    // of the analytics screen.
+    const wanted = new Set(monthsAsc);
+    const totals = new Map<string, number>();
+    for (const e of entries) {
+      // toMonthKey, not date.slice(0,7): it resolves the month in the viewer's
+      // local timezone, and availableMonths above is built the same way. They
+      // must agree or a month's bar silently reads zero.
+      const key = toMonthKey(e.date);
+      if (wanted.has(key)) totals.set(key, (totals.get(key) ?? 0) + e.total);
+    }
     return monthsAsc.map((key) => ({
       key,
       label: monthLabel(key).split(" ")[0].slice(0, 3),
-      total: entries.filter((e) => entryInMonth(e.date, key)).reduce((s, e) => s + e.total, 0),
+      total: totals.get(key) ?? 0,
       selected: selected.includes(key),
     }));
   }, [availableMonths, entries, selected]);

@@ -84,12 +84,21 @@ function buildPcfRows(months?: string[]) {
 }
 
 function buildReceiptRows(months?: string[]) {
-  const entries = getEntries();
+  // Index line items by receipt once. Re-scanning every entry for every
+  // receipt is O(receipts x entries): unnoticeable at today's 194 x 1,456,
+  // tens of millions of comparisons after a few years of an all-time export.
+  const linkedByReceipt = new Map<string, ReturnType<typeof getEntries>>();
+  for (const e of getEntries()) {
+    if (!e.receiptId) continue;
+    const list = linkedByReceipt.get(e.receiptId);
+    if (list) list.push(e);
+    else linkedByReceipt.set(e.receiptId, [e]);
+  }
   return getReceipts()
     .filter((r) => inRange(r.date, months))
     .sort(byDateAsc)
     .map((r) => {
-      const linked = entries.filter((e) => e.receiptId === r.id);
+      const linked = linkedByReceipt.get(r.id) ?? [];
       const recon = effectiveReconciliation(
         r.totalTyped,
         linked.map((e) => e.total),
