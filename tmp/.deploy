@@ -66,3 +66,4 @@ trigger
 2026-06-18u — Verification redeploy: confirm the update banner fires on an already-open production page (second of two deploys).
 2026-06-18v — Update banner: also catch a page that LOADED on a stale bundle (Kitchen's refinement), not just a deploy that lands while it's open.
 2026-06-18w — Scale: month-at-a-time receipts pack (no more all-time memory blowup), parallel bootstrap paging, quadratic scans removed, entries ledger renders a 150-row window.
+2026-06-18x — Security headers (_headers): CSP report-only to start, plus X-Frame-Options, Permissions-Policy, nosniff, Referrer-Policy.
