@@ -40,11 +40,11 @@
 #   frame-ancestors 'none' — same intent as X-Frame-Options, for browsers that
 #     honour CSP instead.
 #
-# Permissions-Policy: camera=() is safe here — receipt capture uses
+# Permissions-Policy: camera=() is safe here, CONFIRMED on a real phone
+# 2026-09-01 — receipt capture still opens the camera. It uses
 # <input type="file" capture="environment">, which goes through the OS file
 # picker and is not governed by the camera permission (that gates
-# getUserMedia, which this app never calls). Still worth confirming on a real
-# phone; rollback is deleting `camera=()` from the line below.
+# getUserMedia, which this app never calls).
 
 /*
   Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://gzijmkzwnfebgaqxcrbh.supabase.co; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
