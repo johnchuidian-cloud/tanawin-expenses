@@ -5,11 +5,22 @@
 # Next copies that directory to the root of the deploy output, which is where
 # Cloudflare looks for it.
 #
-# CSP IS REPORT-ONLY FOR NOW. This app is in daily use and a wrong policy
-# breaks real screens mid-service, so violations are logged to the browser
-# console first and the header is flipped to enforcing in a later deploy, once
-# every screen and role has been clicked through. The other four headers are
-# safe to enforce immediately.
+# CSP IS ENFORCING (flipped 2026-09-01, after the report-only stage).
+#
+# How it was cleared before enforcing: the demo dataset was built in PRODUCTION
+# mode and served locally with this exact policy applied as an ENFORCING meta
+# tag — stricter than a report-only header, so a violation breaks the screen
+# rather than whispering to a console nobody is watching. Every screen was then
+# walked in all three roles (admin, staff, guest): dashboard, review, new, pcf,
+# notes, users/categories/vendors manage, entries, an entry with a receipt
+# photo, gallery, a gallery receipt, categories, the Excel export and the
+# receipts ZIP. Zero securitypolicyviolation events, no broken images, both
+# downloads produced their file. The dev server is NOT usable for this — it
+# uses eval() for hot-reload and reports script-src violations that could never
+# happen on the deployed bundle.
+#
+# If a future change adds a CDN, a font host, an image host or realtime (wss),
+# it MUST be added here or it will be blocked in production and nowhere else.
 #
 # How each directive was chosen (verified against the live bundle, not assumed):
 #   script-src 'unsafe-inline' — the App Router ships its hydration payload as
@@ -36,7 +47,7 @@
 # phone; rollback is deleting `camera=()` from the line below.
 
 /*
-  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://gzijmkzwnfebgaqxcrbh.supabase.co; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://gzijmkzwnfebgaqxcrbh.supabase.co; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   X-Frame-Options: DENY
