@@ -1,0 +1,43 @@
+# Security headers for Tanawin Finance (Cloudflare Pages).
+#
+# Cloudflare consumes this file as configuration rather than serving it, so
+# /_headers itself should return 404 on the live site. Lives in public/ because
+# Next copies that directory to the root of the deploy output, which is where
+# Cloudflare looks for it.
+#
+# CSP IS REPORT-ONLY FOR NOW. This app is in daily use and a wrong policy
+# breaks real screens mid-service, so violations are logged to the browser
+# console first and the header is flipped to enforcing in a later deploy, once
+# every screen and role has been clicked through. The other four headers are
+# safe to enforce immediately.
+#
+# How each directive was chosen (verified against the live bundle, not assumed):
+#   script-src 'unsafe-inline' — the App Router ships its hydration payload as
+#     8 inline <script> blocks with no nonce. Next cannot nonce these without
+#     middleware, so this is unavoidable short of that change. Be honest about
+#     what it costs: this CSP does NOT stop an injected inline script. What it
+#     does buy is blocking EXTERNAL script loads, constraining where the page
+#     may send data (connect-src), and refusing to be framed.
+#   'unsafe-eval' deliberately absent — the production chunks contain no eval().
+#   style-src 'unsafe-inline' — the dashboard/analytics bars set widths and
+#     heights via inline style props; without this the charts render flat.
+#   img-src data: — receipt photos are base64 data URLs stored in the database.
+#     Remove this and every receipt image in the app disappears.
+#   connect-src — 'self' covers /version.json (the update check); the Supabase
+#     origin is the only other host the app talks to. No wss: realtime is not
+#     used anywhere. Add it here if that ever changes.
+#   frame-ancestors 'none' — same intent as X-Frame-Options, for browsers that
+#     honour CSP instead.
+#
+# Permissions-Policy: camera=() is safe here — receipt capture uses
+# <input type="file" capture="environment">, which goes through the OS file
+# picker and is not governed by the camera permission (that gates
+# getUserMedia, which this app never calls). Still worth confirming on a real
+# phone; rollback is deleting `camera=()` from the line below.
+
+/*
+  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://gzijmkzwnfebgaqxcrbh.supabase.co; manifest-src 'self'; worker-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Permissions-Policy: geolocation=(), microphone=(), camera=()
